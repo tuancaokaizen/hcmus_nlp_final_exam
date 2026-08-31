@@ -60,7 +60,7 @@ make config             # sinh dags/config.ini từ .env
 
 | Vấn đề | Cách xử lý |
 |--------|------------|
-| `scripts/up.sh` lỗi `mapfile` (bash cũ / macOS bash 3.2) | Ghép `-f` compose trực tiếp với path quoted |
+| `scripts/up.sh` lỗi `mapfile` (bash cũ không có `mapfile`) | Ghép `-f` compose trực tiếp với path quoted |
 | Path có space làm vỡ `-f` compose | Dùng `"$ROOT/docker-compose.yml"` |
 | Docker Hub timeout / mirror `gcr.io` | Restart Docker Desktop; tắt proxy/registry mirror nếu cần |
 | `minio/mc:RELEASE.2024-12-18...` **not found** | Dùng `minio/mc:latest` |
