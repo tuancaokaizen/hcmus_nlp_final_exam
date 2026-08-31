@@ -1,0 +1,43 @@
+# Minimal stack: no Selenium (use sample_data / replay)
+name: fen-exam
+
+services:
+  minio:
+    extends:
+      file: docker-compose.yml
+      service: minio
+
+  minio-init:
+    extends:
+      file: docker-compose.yml
+      service: minio-init
+
+  postgres:
+    extends:
+      file: docker-compose.yml
+      service: postgres
+
+  airflow-init:
+    extends:
+      file: docker-compose.yml
+      service: airflow-init
+
+  airflow-webserver:
+    extends:
+      file: docker-compose.yml
+      service: airflow-webserver
+
+  airflow-scheduler:
+    extends:
+      file: docker-compose.yml
+      service: airflow-scheduler
+
+  paddle-ocr:
+    extends:
+      file: docker-compose.yml
+      service: paddle-ocr
+
+  fen-job:
+    extends:
+      file: docker-compose.yml
+      service: fen-job

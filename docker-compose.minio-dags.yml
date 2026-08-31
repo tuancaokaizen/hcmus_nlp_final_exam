@@ -1,0 +1,46 @@
+# Overlay: Airflow reads DAGs from MinIO via sidecar sync (prod-like).
+# Overlay: Airflow đọc DAG từ MinIO qua sidecar sync (giống prod).
+# Usage: docker compose -f docker-compose.yml -f docker-compose.minio-dags.yml up -d
+# Dev bind-mount only: make up-dev  (or FEN_DAG_SOURCE=local)
+
+name: fen-exam
+
+services:
+  airflow-dag-sync:
+    image: minio/mc:RELEASE.2024-12-18T13-15-44Z
+    depends_on:
+      minio:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      AIRFLOW_DAG_SYNC_INTERVAL_SEC: ${AIRFLOW_DAG_SYNC_INTERVAL_SEC:-30}
+    volumes:
+      - airflow-dags-cache:/dags
+      - ./scripts/airflow_dag_sync.sh:/sync.sh:ro
+    entrypoint: ["/bin/sh", "/sync.sh"]
+    restart: unless-stopped
+
+  airflow-init:
+    depends_on:
+      airflow-dag-sync:
+        condition: service_started
+    volumes:
+      - airflow-dags-cache:/opt/fen-exam/dags:ro
+
+  airflow-webserver:
+    depends_on:
+      airflow-dag-sync:
+        condition: service_started
+    volumes:
+      - airflow-dags-cache:/opt/fen-exam/dags:ro
+
+  airflow-scheduler:
+    depends_on:
+      airflow-dag-sync:
+        condition: service_started
+    volumes:
+      - airflow-dags-cache:/opt/fen-exam/dags:ro
+
+volumes:
+  airflow-dags-cache:

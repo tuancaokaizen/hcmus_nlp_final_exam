@@ -1,0 +1,93 @@
+[paths]
+raw_dir = data/raw
+staging_dir = data/staging
+output_dir = data/output
+
+[minio]
+endpoint = http://minio:9000
+access_key = admin
+secret_key = admin
+secure = false
+bucket_raw = final-exam-nlp-raw
+bucket_output = final-exam-nlp-raw
+bucket_airflow = airflow
+airflow_dags_prefix = fen-exam
+ocr_output_prefix = ocr
+raw_prefix = facebook
+
+[fen_calligraphy]
+base_url = https://ramclouds.me/v1
+api_key =
+model = gemini-3.5-flash-low
+max_image_side = 1024
+max_retries = 4
+
+[fen_ocr]
+base_url = https://ramclouds.me/v1
+api_key =
+model = gemini-3.5-flash-low
+max_image_side = 1536
+max_retries = 6
+max_tokens = 4096
+page_delay_sec = 5
+
+[fen_label_gemini]
+base_url = https://ramclouds.me/v1
+api_key =
+model = gemini-3.6-flash-high
+
+[fen_label_gpt]
+base_url = https://ramclouds.me/v1
+api_key =
+model = gpt-5.6-luna
+
+[fen_label_deepseek]
+base_url = https://ramclouds.me/v1
+api_key =
+model = deepseek-v4-flash
+
+[fen_label_glm]
+base_url = https://ramclouds.me/v1
+api_key =
+model = glm-5.3-flash
+
+# Legacy fallback sections for synced code paths / Fallback cho code sync
+[gemini_opencv]
+api_key =
+base_url = https://ramclouds.me/v1
+model = gemini-3.5-flash-low
+max_image_side = 1536
+max_retries = 6
+max_tokens = 4096
+page_delay_sec = 5
+
+[openai]
+api_key =
+model = gpt-4o
+
+[paddle]
+service_url = http://paddle-ocr:8080
+render_dpi = 380
+max_image_side = 2400
+
+# [qdrant] — not used in exam Docker stack (vectors disabled)
+
+[final_exam_nlp]
+bucket_raw = final-exam-nlp-raw
+source_prefix = facebook
+batch_size = 25
+target_valid_delta = 100
+max_image_valid_count = 20000
+bottom_year = 2013
+cooldown_sec = 35
+page_load_timeout_sec = 90
+selenium_remote_url = http://selenium-chrome:4444/wd/hub
+paddle_ocr_url = http://paddle-ocr:8080/ocr
+image_timeout_sec = 25
+min_image_width = 200
+qwen_ocr_model = qwen-3.8-max
+
+[docker]
+compose_project = fen-exam
+fen_job_image = fen-exam-fen-job
+project_dir = /opt/fen-exam

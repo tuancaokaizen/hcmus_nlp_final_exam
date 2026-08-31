@@ -1,0 +1,12 @@
+.env
+dags/config.ini
+.mc/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+logs/
+*.log
+.DS_Store
+docker/airflow/logs/
