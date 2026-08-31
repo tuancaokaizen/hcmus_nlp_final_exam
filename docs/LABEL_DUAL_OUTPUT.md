@@ -42,12 +42,38 @@ Tất cả path dưới đây nằm trong bucket **`final-exam-nlp-raw`**, prefi
 
 | File | Nội dung |
 |------|----------|
-| **`ocr/label_dual_pilot/task_b2.jsonl`** | File nộp chính: `image`, `label`, `ground_truth`, `side_matter`, `gemini`, `post_link` |
-| **`ocr/label_dual_pilot/task_b2.xlsx`** | Cùng dữ liệu, format Excel |
+| **`ocr/label_dual_pilot/task_b2.jsonl`** | MinIO — full B2 (+ `side_matter`) |
+| **`ocr/label_dual_pilot/task_b2.xlsx`** | MinIO — same as jsonl |
+| **`output/{group_id}/task_b2.jsonl`** | Host local — **pure submit** (no `side_matter`) |
+| **`output/{group_id}/task_b2.xlsx`** | Host local — same 5 columns |
+
+### Pure Task B2 submit (local `/tmp` → host `output/`)
+
+Sau mỗi run label dual, job ghi thêm 2 file nộp thuần (bind mount `./output` → `/tmp/fen-output`):
+
+| Cột | Có |
+|-----|-----|
+| `image` | ✅ |
+| `label` | ✅ |
+| `ground_truth` | ✅ |
+| `gemini` | ✅ |
+| `post_link` | ✅ |
+| `side_matter` | ❌ không |
+
+```
+output/{group_id}/
+  task_b2.jsonl
+  task_b2.xlsx
+```
+
+Không lẫn flags / GLM / fuse metrics. MinIO `label_dual_pilot/` vẫn giữ bản đầy đủ (có `side_matter`) để debug.
+
+| File | Nội dung |
+|------|----------|
 | `ocr/label_dual_pilot/glm/recommend.jsonl` | GLM + **`fuse_gt`**, bag, cer, … |
 | `ocr/label_dual_pilot/flags.jsonl` | QC từng ảnh (silver / flagged) |
 
-### File chỉ số (giống hvb-processing)
+### File chỉ số
 
 | File | Mục đích |
 |------|----------|
@@ -94,7 +120,7 @@ Dùng để **lọc ảnh cần review** mà không mở từng page JSON.
 
 ### C. Chỉ số cấp ảnh — `glm/recommend.jsonl` (đầy đủ nhất)
 
-Đây là log **per-image** giống hvb-processing. Mỗi dòng gồm:
+Đây là log **per-image** của label dual. Mỗi dòng gồm:
 
 | Nhóm field | Ví dụ chỉ số |
 |------------|----------------|
@@ -152,7 +178,8 @@ Dùng khi cần debug sâu hơn `recommend.jsonl`. Re-run skip OCR nếu file pa
 
 | Mục đích | Đọc file |
 |----------|----------|
-| Nộp bài B2 | `task_b2.jsonl` / `.xlsx` |
+| Nộp bài B2 thuần (không `side_matter`) | `output/{group_id}/task_b2.jsonl` / `.xlsx` |
+| Bản MinIO đầy đủ (có `side_matter`) | `ocr/label_dual_pilot/task_b2.jsonl` |
 | Xem run xong chưa, bao nhiêu ảnh | `summary.json`, `checkpoint.json` |
 | Lọc ảnh cần người xem | `flags.jsonl` (`status=needs_hitl`) |
 | So GLM vs fuse, CER/bag, conf từng phase | `glm/recommend.jsonl` |
@@ -218,13 +245,15 @@ Ví dụ trigger với flush khác:
 |-------|---------|---------|
 | `ocr_limit` / `label_limit` | Tối đa **ảnh pending** mỗi run; `0` = full queue | `0` |
 | `flush_posts` | Upsert jsonl mỗi N **ảnh** | `5` |
-| `prepare_queues` | Tạo queue từ `valid_post` + OCR quote | `true` (lần đầu sau crawl) |
+| `prepare_queues` | Tạo queue từ **`export/valid_post.jsonl`** (+ ảnh MinIO). Legacy: `FEN_LABEL_QUOTE_FILTER=true` lọc theo `ocr_result` | `true` (lần đầu sau crawl) |
 | `glm` | Chạy GLM → `fuse_gt` trong recommend | `true` |
 | `force` | OCR lại ảnh đã xong | `false` |
-| `batch_seq` | Batch crawl (`0` = tất cả queue 1–12) | `0` |
+| `batch_seq` | **Quote shard** 1–12 (`0` = tất cả). Không phải crawl `batch_seq` | `0` |
 | `workers` | Song song (exam Docker: 4 an toàn) | `4` |
 
 **`ocr_limit=0`:** bật `FEN_LABEL_UNLIMITED` — không bị giới hạn chunk 300 ảnh/run.
+
+**E2E / sau crawl:** luôn dùng `batch_seq=0` (hoặc bỏ param) để OCR hết ảnh vừa crawl. Với ít ảnh, prepare chia vào queue 8–12; nếu set `batch_seq=1` sẽ chạy queue rỗng.
 
 ---
 

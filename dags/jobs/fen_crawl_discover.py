@@ -484,7 +484,20 @@ def run_discover_batch(
         if need_capture:
             _enable_network_cdp(driver)
         _install_fetch_hook(driver)
-        driver.get(group_feed)
+        # Re-get after CDP often crashes Chrome ("renderer disconnected") — refresh if already on group /
+        # get lại sau CDP hay làm Chrome crash — nếu đã ở group thì chỉ refresh
+        cur = (getattr(driver, "current_url", "") or "")
+        already_on_group = f"/groups/{group_id}" in cur
+        try:
+            if already_on_group:
+                print(f"{LOG} already on group — refresh instead of get", flush=True)
+                driver.refresh()
+            else:
+                driver.get(group_feed)
+        except Exception as nav_exc:
+            print(f"{LOG} post-cdp navigation failed ({nav_exc!r}) — retry get once", flush=True)
+            time.sleep(2)
+            driver.get(group_feed)
         # tests/crawl_graphql.py waits 6–9s after open /
         # tests/crawl_graphql.py chờ 6–9s sau khi mở
         _human_pause(7.5, 1.5, 1.5)

@@ -1,5 +1,5 @@
-"""Docker Compose job executor for Airflow (replaces KubernetesPodOperator).
-Executor job Docker Compose cho Airflow (thay KubernetesPodOperator).
+"""Docker Compose job executor for Airflow (DockerOperator).
+Executor job Docker Compose cho Airflow (DockerOperator).
 """
 from __future__ import annotations
 
@@ -59,6 +59,13 @@ def build_fen_job_task(
                 target="/opt/fen-exam/dags",
                 type="bind",
                 read_only=True,
+            ),
+            # Persist pure B2 submit files on host / Giữ file nộp B2 thuần trên host
+            Mount(
+                source=f"{settings['project_dir']}/output",
+                target="/tmp/fen-output",
+                type="bind",
+                read_only=False,
             ),
         ],
         command=[],

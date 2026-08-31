@@ -57,7 +57,7 @@ graph TB
 
 ## Nguồn DAG cho Airflow (`FEN_DAG_SOURCE`)
 
-Mặc định **`minio`** (prod-like). Chế độ **`local`** dùng bind mount `./dags` (dev nhanh).
+Mặc định **`minio`** (DAGs sync từ bucket qua sidecar). Chế độ **`local`** dùng bind mount `./dags` (dev nhanh).
 
 | `FEN_DAG_SOURCE` | Cách hoạt động | Lệnh |
 |------------------|----------------|------|
@@ -409,7 +409,7 @@ make verify
 |------|-------|
 | `make configure` | Wizard `.env` + sinh `config.ini` |
 | `make config` | Chỉ regenerate `config.ini` từ `.env` |
-| `make sync` | Copy/transform jobs từ upstream repo |
+| `make sync` | Đồng bộ/transform job code (optional, khi có nguồn sync) |
 | `make build` | Build tất cả images (gồm `fen-job`) |
 | `make up` | `scripts/up.sh`: compose + buckets + Airflow init + DAG sync |
 | `make down` | Dừng stack; **giữ** volumes (data MinIO, Postgres, …) |

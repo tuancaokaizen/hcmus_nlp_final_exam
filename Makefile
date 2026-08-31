@@ -60,6 +60,18 @@ fb-login:
 		-e FEN_GROUP_ID=$${FEN_GROUP_ID:-322453387859386} \
 		fen-job
 
+# Manual FB login via noVNC (http://localhost:7900, password: secret) then save cookies
+# Login FB thủ công qua noVNC rồi lưu cookies
+fb-login-manual:
+	docker compose -f docker-compose.yml -f docker-compose.minio-dags.yml up -d selenium-chrome
+	@echo "Open http://localhost:7900  (password: secret) and log in to Facebook when prompted"
+	docker compose --profile job run --rm \
+		-e FEN_JOB=fen_bootstrap_login \
+		-e FEN_MANUAL_LOGIN=true \
+		-e FEN_HEADLESS=false \
+		-e FEN_GROUP_ID=$${FEN_GROUP_ID:-322453387859386} \
+		fen-job
+
 verify:
 	bash scripts/verify_e2e.sh
 

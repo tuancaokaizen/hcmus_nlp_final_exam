@@ -216,9 +216,9 @@ def _ensure_driver_login(
     fb_totp_secret: str,
     upload_minio: bool,
 ) -> list[dict[str, Any]]:
-    """Profile-first login: reuse PVC session across rollover jobs; MinIO cookies as fallback.
+    """Profile-first login: reuse Chrome profile session across rollover jobs; MinIO cookies as fallback.
 
-    Login ưu tiên profile PVC (sống qua rollover); cookie MinIO chỉ fallback.
+    Login ưu tiên profile Chrome (sống qua rollover); cookie MinIO chỉ fallback.
     """
     session_cookies = list(cookies or [])
     logged_in, session_source = _restore_session_profile_first(

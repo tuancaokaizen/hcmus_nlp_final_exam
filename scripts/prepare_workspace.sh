@@ -11,7 +11,8 @@ mkdir -p \
   dags/jobs/common \
   docker/paddle-ocr \
   .mc \
-  scripts
+  scripts \
+  output
 
 if [[ ! -f .env ]]; then
   cp .env.example .env

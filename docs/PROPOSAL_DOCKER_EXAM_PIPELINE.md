@@ -3,13 +3,11 @@
 > **Vận hành hiện tại:** [`README.md`](../README.md), [`USER_SETUP.md`](USER_SETUP.md), [`LABEL_DUAL_OUTPUT.md`](LABEL_DUAL_OUTPUT.md), [`PIPELINE_BUILD_DEPLOY_RUN.md`](PIPELINE_BUILD_DEPLOY_RUN.md) — luồng chính **label dual** (`task_b2.jsonl`, `flush_posts=5`). File này là proposal thiết kế ban đầu.
 
 > **Mục đích:** Đề xuất kiến trúc repo `implement_nlp_pipeline_for_exam` cho **người chấm đồ án**.  
-> Copy **cùng logic pipeline** từ repo processing upstream, deploy **một mode duy nhất: Docker Compose**  
-> (Airflow + MinIO + Paddle + Selenium).
+> Deploy **một mode duy nhất: Docker Compose** (Airflow + MinIO + Paddle + Selenium).
 
 **Phiên bản:** `v0.2-proposal`  
 **Ngày:** 2026-08-31  
-**Repo nguồn:** `implement_ocr_pipeline` (upstream — set `UPSTREAM_ROOT` khi sync)  
-**Repo đích:** `features/implement_nlp_pipeline_for_exam`
+**Repo:** `features/implement_nlp_pipeline_for_exam`
 
 ---
 
@@ -17,28 +15,26 @@
 
 ### 1.1 Vấn đề
 
-Pipeline gốc chạy trên K3s — người chấm khó reproduce. Cần repo exam **tự chứa**, `docker compose up` là chạy được.
+Cần repo exam **tự chứa**, người chấm chỉ cần Docker Desktop — `docker compose up` / `make up` là chạy được.
 
-### 1.2 Giải pháp — **1 mode Docker**
+### 1.2 Giải pháp — **1 mode Docker Compose**
 
 | Thành phần | Docker service |
 |------------|----------------|
-| Orchestration | `airflow-webserver` + `airflow-scheduler` + `airflow-worker` |
+| Orchestration | `airflow-webserver` + `airflow-scheduler` |
 | Object storage | `minio` |
 | OCR nhánh B | `paddle-ocr` (FastAPI, build từ Dockerfile) |
 | Crawl GraphQL | `selenium-chrome` |
-| Job runner | `fen-job` container (gọi `run_k8s_job.py`) |
+| Job runner | `fen-job` container (entrypoint `run_job.py`) |
 | LLM | API ngoài (Gemini / GPT / DeepSeek / GLM) — keys trong `.env` |
 
-**Không dùng K3s / kubectl** trong repo exam. Logic nghiệp vụ giữ nguyên; chỉ thay lớp orchestration:
-
-| Production (K3s) | Exam (Docker) |
-|------------------|---------------|
-| `KubernetesPodOperator` | `DockerOperator` hoặc `BashOperator` → `docker compose run fen-job` |
-| In-cluster DNS `minio.storage.svc` | `http://minio:9000` |
-| Paddle StatefulSet | `paddle-ocr:8080` |
-| PVC python cache | Named volume `fen-python-deps` |
-| `deploy_airflow.sh` upload MinIO | Volume mount `./dags` + optional sync bucket `airflow` |
+| Lớp | Cách làm trong exam |
+|-----|---------------------|
+| Chạy job | `DockerOperator` → image `fen-exam-fen-job` |
+| MinIO | `http://minio:9000` (compose network) |
+| Paddle | `http://paddle-ocr:8080` |
+| Dependencies Python job | Build sẵn trong image `fen-job` |
+| Deploy DAG | `make deploy` lên bucket `airflow` + sidecar sync (hoặc `make up-dev` bind mount `./dags`) |
 
 ---
 
@@ -136,16 +132,13 @@ graph TB
 
 Volumes: `minio-data`, `fen-python-deps`, `selenium-profile` (cookies)
 
-### 3.3 Thay `KubernetesPodOperator`
+### 3.3 Chạy job qua `DockerOperator`
 
-Tạo `dags/jobs/common/docker_executor.py`:
+Module `dags/jobs/common/docker_executor.py` spawn container `fen-job` trên cùng Docker network (mount `/var/run/docker.sock` vào Airflow).
 
 ```python
-# Airflow task gọi:
-# docker compose run --rm -e FEN_JOB=fen_ocr fen-job
+# Airflow task gọi image fen-exam-fen-job với FEN_JOB=<job_name>
 ```
-
-Hoặc mount Docker socket vào worker (`/var/run/docker.sock`) để `DockerOperator` spawn `fen-job` container cùng network `compose_default`.
 
 Env trong job container:
 ```
@@ -159,9 +152,9 @@ SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
 
 | Image | Dockerfile | Nội dung |
 |-------|------------|----------|
-| `fen-paddle-ocr` | `docker/paddle-ocr/Dockerfile` | Copy từ upstream `services/paddle_ocr/` |
+| `fen-paddle-ocr` | `docker/paddle-ocr/Dockerfile` | FastAPI + PaddleOCR |
 | `fen-airflow` | `docker/airflow/Dockerfile` | `apache/airflow:2.10.5` + `requirements.txt` + DAGs |
-| `fen-job` | `docker/fen-job/Dockerfile` | Python 3.12 + jobs + entrypoint `run_k8s_job.py` |
+| `fen-job` | `docker/fen-job/Dockerfile` | Python 3.12 + jobs + entrypoint `run_job.py` |
 
 ---
 
@@ -184,7 +177,7 @@ implement_nlp_pipeline_for_exam/
 │   ├── config.ini.example
 │   ├── requirements.txt
 │   ├── pipelines/                # subset FEN DAGs (docker executor)
-│   └── jobs/                     # sync từ upstream
+│   └── jobs/                     # job Python (crawl, OCR, label)
 │
 ├── scripts/
 │   ├── bootstrap.sh              # cp .env, build images, compose up
@@ -203,7 +196,7 @@ implement_nlp_pipeline_for_exam/
 └── tests/
 ```
 
-**Không có thư mục `k8s/`** trong repo exam.
+Repo exam chỉ dùng Docker Compose (không kèm manifest cluster).
 
 ---
 
@@ -286,7 +279,7 @@ make verify
 2. `make load-sample && make trigger-demo` → `task_b2.jsonl` trên MinIO  
 3. B2 đủ cột: `image, caption, ground_truth, side_matter, gemini, post_link`  
 4. `make verify` pass  
-5. `GRADER_GUIDE.md` ≤ 10 bước, không cần K3s  
+5. `GRADER_GUIDE.md` ≤ 10 bước, chỉ cần Docker Desktop  
 
 ---
 
@@ -294,23 +287,22 @@ make verify
 
 | Quyết định | Lý do |
 |------------|-------|
-| **Chỉ Docker Compose** | Người chấm không cần cluster K3s |
-| Giữ GraphQL crawl | Đúng logic gốc; `sample_data` để skip |
-| `DockerOperator` thay K8s pod | Cùng `run_k8s_job.py`, không fork business logic |
+| **Chỉ Docker Compose** | Người chấm chỉ cần Docker Desktop |
+| Giữ GraphQL crawl | Đúng logic nghiệp vụ; `sample_data` để skip khi không crawl live |
+| `DockerOperator` + `run_job.py` | Một entrypoint job, không fork business logic |
 | LLM qua API | Không bundle weights |
-| Submodule upstream processing | Tránh duplicate code |
 
 ---
 
-## Phụ lục — Tham chiếu upstream processing repo
+## Phụ lục — Module chính trong repo
 
-| Thành phần | Path gốc |
-|------------|-----------|
-| Crawl + GraphQL | `dags/jobs/final_exam_nlp_v5_*.py`, `final_exam_nlp_graphql_batch.py` |
-| OCR / Label / GLM | `final_exam_nlp_ocr*.py`, `final_exam_nlp_gt_confidence_judge.py` |
-| Paddle service | `services/paddle_ocr/` |
-| Label dual spec | `docs/fen-ocr-label-dual.md` |
+| Thành phần | Path |
+|------------|------|
+| Crawl + GraphQL | `dags/jobs/fen_crawl_*.py`, `final_exam_nlp_graphql_batch.py` |
+| OCR / Label dual / GLM | `dags/jobs/final_exam_nlp_ocr*.py` |
+| Paddle service | `docker/paddle-ocr/` |
+| DAGs | `dags/pipelines/fen_*.py` |
 
 ---
 
-*v0.2 — Docker-only. Approve trước khi implement.*
+*v0.2 — Docker Compose only.*

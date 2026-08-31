@@ -243,7 +243,7 @@ def _settings() -> dict[str, str]:
             cfg,
             "final_exam_nlp",
             "selenium_remote_url",
-            fallback="http://selenium-chrome.orchestrator.svc.cluster.local:4444/wd/hub",
+            fallback="http://selenium-chrome:4444/wd/hub",
         ),
         "page_load_timeout_sec": get_value(
             cfg, "final_exam_nlp", "page_load_timeout_sec", fallback="90"
@@ -763,8 +763,8 @@ def _build_driver(
             "goog:perfLoggingPrefs",
             {"enableNetwork": True, "enablePage": False},
         )
-    # Persist cookies inside Chrome's own profile on the selenium PVC /
-    # Giữ cookie trong profile Chrome trên PVC của selenium
+    # Persist cookies inside Chrome's own profile on the selenium volume /
+    # Giữ cookie trong profile Chrome trên volume của selenium
     profile_dir = (os.environ.get("SELENIUM_CHROME_PROFILE_DIR") or "/data/chrome-profile").strip()
     if profile_dir:
         # Stale locks after selenium rollout block new sessions / Lock cũ sau rollout chặn session mới
@@ -1260,9 +1260,9 @@ def _seek_next_media_fbid(
 
 
 def _probe_profile_session(driver, pause_sec: float = 2.0) -> bool:
-    """Check whether the persisted Chrome PVC profile is already logged into Facebook.
+    """Check whether the persisted Chrome profile is already logged into Facebook.
 
-    Kiểm tra profile Chrome trên PVC đã đăng nhập Facebook hay chưa.
+    Kiểm tra profile Chrome đã đăng nhập Facebook hay chưa.
     """
     try:
         driver.get(FB_BASE_URL + "/")
@@ -1295,9 +1295,9 @@ def _restore_session_profile_first(
     *,
     log_prefix: str = "[final_exam_nlp_crawl]",
 ) -> tuple[bool, str]:
-    """Prefer PVC Chrome profile; fall back to MinIO cookie inject only when needed.
+    """Prefer Chrome profile volume; fall back to MinIO cookie inject only when needed.
 
-    Ưu tiên session trên profile PVC; chỉ inject cookie MinIO khi profile chưa login.
+    Ưu tiên session trên profile Chrome; chỉ inject cookie MinIO khi profile chưa login.
 
     Returns / Trả về:
         (logged_in, source) where source is profile|minio|none
@@ -1320,9 +1320,9 @@ def _restore_session_profile_first(
 
 
 def _open_group_feed(driver, group_url: str, cookies: list[dict[str, Any]] | None) -> None:
-    """Open group feed using PVC profile first, MinIO cookies as fallback.
+    """Open group feed using Chrome profile first, MinIO cookies as fallback.
 
-    Mở feed group: ưu tiên profile PVC, cookie MinIO chỉ là fallback.
+    Mở feed group: ưu tiên profile Chrome, cookie MinIO chỉ là fallback.
     """
     _restore_session_profile_first(driver, cookies)
     driver.get(group_url)

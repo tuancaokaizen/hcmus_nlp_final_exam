@@ -104,6 +104,9 @@ _VARIANT_PAIRS = (
 )
 _VARIANT_TABLE = str.maketrans(_VARIANT_PAIRS[0::2], _VARIANT_PAIRS[1::2])
 B2_FIELDS = ("image", "label", "ground_truth", "side_matter", "gemini", "post_link")
+# Pure Task B2 submit (no side_matter) for /tmp local deliverables /
+# Schema nộp Task B2 thuần (không side_matter) cho file local /tmp
+B2_SUBMIT_FIELDS = ("image", "label", "ground_truth", "gemini", "post_link")
 FLUSH_POSTS = 10
 # Default pending images per run (chunk rollover) / Số ảnh pending mỗi lần chạy
 DEFAULT_TARGET_CHUNK = 300
@@ -284,7 +287,7 @@ TESTER_HITL_COLUMN_DOCS: tuple[tuple[str, str, str], ...] = (
 VISION_MODEL = "gemini-3.6-flash-high"
 GPT_MODEL = "gpt-5.6-luna"
 EVAL_MODEL = "deepseek-v4-flash"
-PADDLE_URL = "http://fen-paddle-ocr.ocr.svc.cluster.local:8080/ocr"
+PADDLE_URL = "http://paddle-ocr:8080/ocr"
 # Match in-cluster Paddle max side so polygons map to pixels /
 # Khớp cạnh dài Paddle trong cluster để polygon khớp pixel
 PADDLE_MAX_SIDE = 2048
@@ -1788,6 +1791,90 @@ def b2_public_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def b2_submit_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Pure Task B2 submit row — no side_matter or extra keys.
+
+    Dòng nộp Task B2 thuần — không side_matter, không cột phụ.
+    """
+    gemini = row.get("gemini") if isinstance(row.get("gemini"), list) else []
+    return {
+        "image": str(row.get("image") or ""),
+        "label": str(row.get("label") or ""),
+        "ground_truth": str(row.get("ground_truth") or ""),
+        "gemini": gemini,
+        "post_link": str(row.get("post_link") or ""),
+    }
+
+
+def _build_b2_submit_xlsx(rows: list[dict[str, Any]], path: str) -> None:
+    """Write pure Task B2 xlsx (no side_matter) / Ghi xlsx B2 thuần (không side_matter)."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "B2"
+    ws.append(list(B2_SUBMIT_FIELDS))
+    for cell in ws[1]:
+        cell.font = Font(bold=True)
+    link_font = Font(color="0563C1", underline="single")
+    for row in rows:
+        gemini = row.get("gemini") or []
+        ws.append(
+            [
+                row.get("image") or "",
+                row.get("label") or "",
+                row.get("ground_truth") or "",
+                json.dumps(gemini, ensure_ascii=False),
+                row.get("post_link") or "",
+            ]
+        )
+    for excel_row in ws.iter_rows(min_row=2):
+        for cell in excel_row:
+            cell.alignment = Alignment(wrap_text=True, vertical="top")
+        ws.row_dimensions[excel_row[0].row].height = 60
+        # Clickable Facebook permalink in column E / Permalink Facebook click được ở cột E
+        link_cell = excel_row[4]
+        url = str(link_cell.value or "").strip()
+        if url.startswith("http"):
+            link_cell.hyperlink = url
+            link_cell.font = link_font
+    ws.column_dimensions["A"].width = 40
+    ws.column_dimensions["B"].width = 40
+    ws.column_dimensions["C"].width = 50
+    ws.column_dimensions["D"].width = 50
+    ws.column_dimensions["E"].width = 55
+    ws.freeze_panes = "A2"
+    wb.save(path)
+
+
+def write_b2_submit_local(
+    *,
+    group_id: str,
+    rows: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Write pure B2 jsonl+xlsx under /tmp/fen-output/{group_id}/.
+
+    Ghi B2 thuần jsonl+xlsx vào /tmp/fen-output/{group_id}/.
+    """
+    from common.config import get_output_dir
+
+    submit_rows = [b2_submit_row(r) for r in rows]
+    out_dir = get_output_dir() / str(group_id).strip()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    jsonl_path = out_dir / "task_b2.jsonl"
+    xlsx_path = out_dir / "task_b2.xlsx"
+    lines = [json.dumps(r, ensure_ascii=False) for r in submit_rows]
+    jsonl_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    _build_b2_submit_xlsx(submit_rows, str(xlsx_path))
+    print(
+        f"{LOG} local_submit n={len(submit_rows)} "
+        f"jsonl={jsonl_path} xlsx={xlsx_path}",
+        flush=True,
+    )
+    return {"task_b2_jsonl": str(jsonl_path), "task_b2_xlsx": str(xlsx_path)}
+
+
 def _copy_src_image(bucket: str, src_key: str, dest_key: str) -> None:
     """Server-side copy into the isolated prefix / Copy phía server vào prefix tách."""
     from minio.commonconfig import CopySource
@@ -2694,46 +2781,86 @@ def collect_quote_items(
     source_prefix: str,
     group_id: str,
 ) -> list[dict[str, str]]:
-    """Quote images: caption ∩ OCR CJK (read ocr_result, never write it).
+    """Build label-dual queue from valid_post images (crawl → OCR).
 
-    Ảnh quote: caption giao CJK OCR (đọc ocr_result, không ghi).
+    Tạo hàng đợi label dual từ ảnh valid_post (crawl → OCR).
+    Optional legacy filter: FEN_LABEL_QUOTE_FILTER=true reads ocr_result
+    and keeps caption∩OCR quote rows only /
+    Lọc legacy tùy chọn: FEN_LABEL_QUOTE_FILTER=true đọc ocr_result
+    và chỉ giữ dòng quote caption∩OCR.
     """
     captions = _caption_map_for_posts(bucket, source_prefix, group_id)
     links = _post_link_map_for_posts(bucket, source_prefix, group_id)
     items: list[dict[str, str]] = []
     seen: set[str] = set()
-    ocr_key = _ocr_output_key(source_prefix, group_id)
-    for row in read_jsonl(bucket, ocr_key):
-        image = str(row.get("image") or "").strip()
-        if not image:
-            continue
-        path = image if image.startswith("/") else f"/{image.lstrip('/')}"
-        if path in seen:
-            continue
+
+    # Legacy re-queue from prior ocr_result / Hàng đợi legacy từ ocr_result cũ
+    if _bool_env("FEN_LABEL_QUOTE_FILTER", False):
+        ocr_key = _ocr_output_key(source_prefix, group_id)
+        for row in read_jsonl(bucket, ocr_key):
+            image = str(row.get("image") or "").strip()
+            if not image:
+                continue
+            path = image if image.startswith("/") else f"/{image.lstrip('/')}"
+            if path in seen:
+                continue
+            post_id = str(row.get("post_id") or "").strip()
+            caption = captions.get(post_id) or str(row.get("label") or "")
+            ocr_cjk = ocr_cjk_from_result(row)
+            align, _hint = caption_use(caption, set(ocr_cjk))
+            if align != "quote":
+                continue
+            src_key = _object_key_from_image_path(source_prefix, group_id, path)
+            if not object_exists(bucket, src_key):
+                continue
+            seen.add(path)
+            items.append(
+                {
+                    "post_id": post_id,
+                    "image": path,
+                    "src_key": src_key,
+                    "caption": caption,
+                    "group_id": group_id,
+                    "post_link": facebook_post_link(
+                        group_id,
+                        post_id,
+                        str(row.get("post_link") or row.get("permalink") or links.get(post_id) or ""),
+                    ),
+                }
+            )
+        return items
+
+    # Exam path: every valid_post image still on MinIO /
+    # Luồng exam: mọi ảnh valid_post còn trên MinIO
+    for row in read_jsonl(bucket, task_export_valid_key(source_prefix, group_id)):
         post_id = str(row.get("post_id") or "").strip()
-        caption = captions.get(post_id) or str(row.get("label") or "")
-        ocr_cjk = ocr_cjk_from_result(row)
-        align, _hint = caption_use(caption, set(ocr_cjk))
-        if align != "quote":
+        images = [str(x) for x in (row.get("images") or []) if str(x).strip()]
+        if not post_id or not images:
             continue
-        src_key = _object_key_from_image_path(source_prefix, group_id, path)
-        if not object_exists(bucket, src_key):
-            continue
-        seen.add(path)
-        items.append(
-            {
-                "post_id": post_id,
-                "image": path,
-                "src_key": src_key,
-                "caption": caption,
-                "group_id": group_id,
-                "post_link": facebook_post_link(
-                    group_id,
-                    post_id,
-                    str(row.get("post_link") or row.get("permalink") or links.get(post_id) or ""),
-                ),
-            }
+        caption = captions.get(post_id) or str(row.get("caption") or row.get("label") or "")
+        post_link = facebook_post_link(
+            group_id,
+            post_id,
+            str(row.get("post_link") or row.get("permalink") or links.get(post_id) or ""),
         )
+        for image in images:
+            path = image if image.startswith("/") else f"/{image.lstrip('/')}"
+            if path in seen:
+                continue
+            src_key = _object_key_from_image_path(source_prefix, group_id, path)
+            if not object_exists(bucket, src_key):
+                continue
+            seen.add(path)
+            items.append(
+                {
+                    "post_id": post_id,
+                    "image": path,
+                    "src_key": src_key,
+                    "caption": caption,
+                    "group_id": group_id,
+                    "post_link": post_link,
+                }
+            )
     return items
 
 
@@ -3189,16 +3316,24 @@ def _glm_vision_raw(image_bytes: bytes, prompt: str, model: str) -> tuple[str, s
         from openai import OpenAI
     except ModuleNotFoundError as exc:
         return "", f"missing_openai:{exc}"
+    from common.fen_stage_config import stage_api_key, stage_base_url
+
     cfg = load_config()
     try:
         from common.api_keys import next_api_key
 
         api_key = next_api_key()
     except Exception:
-        api_key = get_value(cfg, "gemini_opencv", "api_key", fallback="").strip()
+        # Prefer fen_label_glm, then gemini_opencv / Ưu tiên fen_label_glm rồi gemini_opencv
+        api_key = stage_api_key("fen_label_glm") or get_value(
+            cfg, "gemini_opencv", "api_key", fallback=""
+        ).strip()
     if not api_key:
         return "", "missing_gemini_api_key"
-    base_url = get_value(cfg, "gemini_opencv", "base_url", fallback="https://ramclouds.me/v1").strip()
+    base_url = (
+        stage_base_url("fen_label_glm")
+        or get_value(cfg, "gemini_opencv", "base_url", fallback="https://ramclouds.me/v1").strip()
+    )
     png = _to_png_bytes(image_bytes, 1600)
     b64 = base64.standard_b64encode(png).decode("ascii")
     client = OpenAI(api_key=api_key, base_url=base_url or None)
@@ -4714,6 +4849,10 @@ def run_label_dual(
             xlsx = f"{tmp}/task_b2.xlsx"
             _build_b2_xlsx([b2_public_row(r) for r in final_b2], xlsx)
             upload_file(get_minio_client(), bucket, f"{root}/task_b2.xlsx", xlsx)
+        # Pure Task B2 (no side_matter) for local submit / B2 thuần nộp local
+        local_paths = write_b2_submit_local(group_id=gid, rows=final_b2)
+    else:
+        local_paths = {}
     glm_rows = read_jsonl(bucket, f"{root}/glm/recommend.jsonl")
     glm_sum = _glm_summary_from_rows(glm_rows, glm_run_id, glm_model) if glm_rows else {}
     if glm_sum:
@@ -4743,6 +4882,7 @@ def run_label_dual(
         "queue": queue_meta,
         "task_b2": f"{root}/task_b2.jsonl",
         "task_b2_xlsx": f"{root}/task_b2.xlsx",
+        "local_submit": local_paths,
         "images_prefix": f"{root}/images/",
         "root": root,
         "updated_at": utc_now_iso(),

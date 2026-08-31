@@ -1,20 +1,20 @@
 #!/bin/bash
 set -euo pipefail
 
-# Persistent dirs on PVC (survive pod restarts) / Thư mục PVC giữ qua restart pod
+# Persistent dirs on named volume (survive container restarts) / Thư mục trên named volume
 DATA_ROOT="${FEN_PADDLE_DATA_ROOT:-/var/lib/fen-paddle}"
 VENV_DIR="${DATA_ROOT}/venv"
 MARKER="${VENV_DIR}/.install-complete"
 
 mkdir -p "${VENV_DIR}" "${DATA_ROOT}/paddlex"
-# PaddleX defaults to ~/.paddlex; link to PVC subdir / PaddleX mặc định ~/.paddlex; symlink sang PVC
+# PaddleX defaults to ~/.paddlex; link to volume subdir / PaddleX mặc định ~/.paddlex; symlink sang volume
 mkdir -p /root
 ln -sfn "${DATA_ROOT}/paddlex" /root/.paddlex
 export PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK="${PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK:-True}"
 
-# Reuse venv on PVC to avoid multi-GB pip install every restart / Tái dùng venv PVC, tránh pip mỗi lần restart
+# Reuse venv on volume to avoid multi-GB pip install every restart / Tái dùng venv trên volume
 if [ ! -f "${MARKER}" ]; then
-  echo "First-time setup: installing system + Python packages into PVC venv..."
+  echo "First-time setup: installing system + Python packages into volume venv..."
   apt-get update
   apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libgomp1 python3-venv
   rm -rf /var/lib/apt/lists/*
@@ -34,9 +34,9 @@ if [ ! -f "${MARKER}" ]; then
   echo "Installing Python packages (may take several minutes)..."
   pip install --no-cache-dir -r /app/requirements.txt
   touch "${MARKER}"
-  echo "PVC venv install complete."
+  echo "Volume venv install complete."
 else
-  echo "Reusing PVC venv (skip pip install)."
+  echo "Reusing volume venv (skip pip install)."
   # shellcheck disable=SC1091
   source "${VENV_DIR}/bin/activate"
   apt-get update

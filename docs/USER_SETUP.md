@@ -64,7 +64,7 @@ make bootstrap   # = FEN_UP_BUILD=always make up
 
 | Mode | Setting | DAG source |
 |------|---------|------------|
-| Prod-like | `FEN_DAG_SOURCE=minio` | MinIO → sidecar sync |
+| Default | `FEN_DAG_SOURCE=minio` | MinIO → sidecar sync |
 | Dev | `make up-dev` hoặc `FEN_DAG_SOURCE=local` | Bind mount `./dags` |
 
 ---
@@ -144,7 +144,7 @@ make verify
 ```json
 {
   "group_id": "322453387859386",
-  "batch_seq": 1,
+  "batch_seq": 0,
   "label_limit": 0,
   "flush_posts": 5,
   "prepare_queues": true,
@@ -152,6 +152,8 @@ make verify
   "force": false
 }
 ```
+
+`batch_seq`: **0** = mọi quote queue 1–12 (khuyến nghị sau crawl). `1`–`12` = chỉ một shard.
 
 **Output:** `ocr/label_dual_pilot/task_b2.jsonl`, `task_b2.xlsx`, `glm/recommend.jsonl` (`fuse_gt`).
 
