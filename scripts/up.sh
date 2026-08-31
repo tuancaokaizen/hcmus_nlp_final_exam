@@ -11,8 +11,10 @@ bash scripts/prepare_workspace.sh
 # shellcheck disable=SC1091
 source .env
 
-mapfile -t COMPOSE_ARGS < <(bash scripts/compose_args.sh)
-COMPOSE=(docker compose "${COMPOSE_ARGS[@]}")
+COMPOSE=(docker compose -f "$ROOT/docker-compose.yml")
+if [[ "${FEN_DAG_SOURCE:-minio}" != "local" ]]; then
+  COMPOSE+=(-f "$ROOT/docker-compose.minio-dags.yml")
+fi
 
 DAG_SOURCE="${FEN_DAG_SOURCE:-minio}"
 UP_BUILD="${FEN_UP_BUILD:-}"

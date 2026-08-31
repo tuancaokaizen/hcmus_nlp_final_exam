@@ -117,7 +117,9 @@ with DAG(
         "FEN_GROUP_ID": _param_expr("group_id"),
         "FEN_BATCH_TARGET": _param_expr("batch_target"),
         "FEN_CRAWL_MODE": "split",
-        "FEN_HEADLESS": "true",
+        # Headed Chrome required for CDP GraphQL sniffer on FB /
+        # Chrome headed bắt buộc cho CDP sniffer GraphQL trên FB
+        "FEN_HEADLESS": "false",
         "FEN_UPLOAD_MINIO": "true",
         "FEN_RESET_CRAWL_DATA": _bool_expr("reset_crawl_data"),
         "FEN_MINIO_ENDPOINT": "http://minio:9000",
@@ -145,6 +147,9 @@ with DAG(
         job_name="fen_crawl_discover",
         execution_timeout=timedelta(hours=4),
         env_vars=base_env,
+        # Branch skips fb_login → discover must not require all upstream success /
+        # Branch bỏ fb_login → discover không được đòi all_success
+        trigger_rule="none_failed_min_one_success",
     )
     enrich = build_fen_job_task(
         task_id="crawl_enrich",
@@ -170,7 +175,9 @@ with DAG(
         execution_timeout=timedelta(hours=12),
         env_vars={
             "FEN_GROUP_ID": _param_expr("group_id"),
-            "FEN_LABEL_BATCH_SEQ": "{{ ti.xcom_pull(task_ids='resolve_ocr_batch', key='batch_seq') }}",
+            # Quote queues 1–12 are shards of ALL valid images — not crawl batch_seq /
+            # Queue quote 1–12 là shard toàn bộ ảnh valid — không phải crawl batch_seq
+            "FEN_LABEL_BATCH_SEQ": "0",
             "FEN_LABEL_LIMIT": _param_expr("ocr_limit"),
             "FEN_LABEL_TARGET": "0",
             "FEN_LABEL_UNLIMITED": (

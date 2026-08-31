@@ -32,6 +32,7 @@ from final_exam_nlp_crawl_runner import (
     _settings,
 )
 from fen_crawl_common import (
+    crawl_root,
     download_log_key,
     enrich_invalid_key,
     enrich_valid_key,
@@ -40,7 +41,6 @@ from fen_crawl_common import (
     read_jsonl,
     task_export_invalid_key,
     task_export_valid_key,
-    v5_root,
     write_jsonl,
 )
 
@@ -333,8 +333,14 @@ def _vision_ocr(image_bytes: bytes, *, model: str, prompt: str) -> tuple[str, st
         return "", f"missing_openai:{exc}"
 
     cfg = load_config()
-    fallback_key = stage_api_key("fen_ocr") or get_value(cfg, "gemini_opencv", "api_key", fallback="").strip()
-    base_url = stage_base_url("fen_ocr")
+    # Label dual prefers fen_label_gemini; OCR job uses fen_ocr /
+    # Label dual ưu tiên fen_label_gemini; job OCR dùng fen_ocr
+    fallback_key = (
+        stage_api_key("fen_label_gemini")
+        or stage_api_key("fen_ocr")
+        or get_value(cfg, "gemini_opencv", "api_key", fallback="").strip()
+    )
+    base_url = stage_base_url("fen_label_gemini") or stage_base_url("fen_ocr")
     max_retries = int(get_value(cfg, "gemini_opencv", "max_retries", fallback="4"))
     max_side = int(get_value(cfg, "gemini_opencv", "max_image_side", fallback="1536"))
     max_tokens = int(get_value(cfg, "gemini_opencv", "max_tokens", fallback="4096"))
@@ -573,7 +579,8 @@ def _caption_map(bucket: str, source_prefix: str, group_id: str) -> dict[str, st
             _put_caption(out, row)
     # Mid-crawl batches also carry caption / Batch đang crawl cũng có caption
     for sub in ("discover/batches/", "enrich/batches/"):
-        prefix = f"{v5_root(source_prefix, group_id)}/{sub}"
+        # Crawl path prefix (renamed from v5_root) / Prefix crawl (đổi tên từ v5_root)
+        prefix = f"{crawl_root(source_prefix, group_id)}/{sub}"
         for key in list_objects_with_prefix(bucket, prefix, suffix=".jsonl"):
             for row in read_jsonl(bucket, key):
                 _put_caption(out, row)

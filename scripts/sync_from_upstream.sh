@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# Sync job code from upstream NLP processing repo and apply exam renames (crawl/, fen_crawl_*)
-# Đồng bộ job từ repo upstream và đổi tên cho exam (crawl/, fen_crawl_*)
+# Optional: sync job code from an external processing repo into this exam repo.
+# Optional: đồng bộ job từ repo processing ngoài vào repo exam này.
+# Requires UPSTREAM_ROOT pointing at a repo that has dags/jobs/.
+# Cần UPSTREAM_ROOT trỏ tới repo có dags/jobs/.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-UPSTREAM="${UPSTREAM_ROOT:-$(cd "$ROOT/../implement_ocr_pipeline/hvb-processing" 2>/dev/null && pwd || true)}"
+UPSTREAM="${UPSTREAM_ROOT:-}"
 
 if [[ -z "$UPSTREAM" || ! -d "$UPSTREAM/dags/jobs" ]]; then
-  UPSTREAM="$(cd "$ROOT/../../implement_ocr_pipeline/hvb-processing" 2>/dev/null && pwd || true)"
-fi
-if [[ ! -d "${UPSTREAM:-}/dags/jobs" ]]; then
-  echo "Upstream repo not found. Set UPSTREAM_ROOT=/path/to/processing-repo"
+  echo "Set UPSTREAM_ROOT=/absolute/path/to/processing-repo (must contain dags/jobs/)"
   exit 1
 fi
 
@@ -22,6 +21,7 @@ PIPE="$ROOT/dags/pipelines"
 mkdir -p "$COMMON" "$PIPE" "$ROOT/docker/paddle-ocr"
 
 apply_fen_prefix() {
+  # Rename legacy prefixes in copied sources / Đổi prefix cũ trong source copy
   local f="$1"
   sed -i.bak \
     -e 's/HVB_/FEN_/g' \
@@ -89,8 +89,15 @@ transform_crawl "$UPSTREAM/dags/jobs/final_exam_nlp_v5_discover.py" "$JOBS/fen_c
 transform_crawl "$UPSTREAM/dags/jobs/final_exam_nlp_v5_enrich.py" "$JOBS/fen_crawl_enrich.py"
 transform_crawl "$UPSTREAM/dags/jobs/final_exam_nlp_v5_download.py" "$JOBS/fen_crawl_download.py"
 
-# run_job from run_k8s_job + aliases
-cp "$UPSTREAM/dags/jobs/run_k8s_job.py" "$JOBS/run_job.py"
+# run_job entrypoint (source may be named run_k8s_job.py historically) + aliases
+# Entrypoint run_job (source có thể tên run_k8s_job.py lịch sử) + aliases
+if [[ -f "$UPSTREAM/dags/jobs/run_job.py" ]]; then
+  cp "$UPSTREAM/dags/jobs/run_job.py" "$JOBS/run_job.py"
+elif [[ -f "$UPSTREAM/dags/jobs/run_k8s_job.py" ]]; then
+  cp "$UPSTREAM/dags/jobs/run_k8s_job.py" "$JOBS/run_job.py"
+else
+  echo "Missing run_job.py / run_k8s_job.py under $UPSTREAM/dags/jobs"; exit 1
+fi
 sed -i.bak \
   -e 's/final_exam_nlp_v5_common/fen_crawl_common/g' \
   -e 's/final_exam_nlp_v5_discover/fen_crawl_discover/g' \
@@ -133,11 +140,19 @@ text = text.replace(
 )
 text = text.replace(
     '"""CLI entrypoint for FEN v2 jobs running inside KubernetesPodOperator pods.',
-    '"""CLI entrypoint for FEN exam jobs running inside Docker containers.',
+    '"""CLI entrypoint for FEN exam jobs (Docker Compose / DockerOperator).',
+)
+text = text.replace(
+    '"""CLI entrypoint for HVB v2 jobs running inside KubernetesPodOperator pods.',
+    '"""CLI entrypoint for FEN exam jobs (Docker Compose / DockerOperator).',
 )
 text = text.replace(
     'Điểm vào CLI cho job FEN v2 chạy trong pod KubernetesPodOperator.',
-    'Điểm vào CLI cho job FEN exam chạy trong container Docker.',
+    'Điểm vào CLI cho job FEN exam chạy qua Docker Compose / DockerOperator.',
+)
+text = text.replace(
+    'Điểm vào CLI cho job HVB v2 chạy trong pod KubernetesPodOperator.',
+    'Điểm vào CLI cho job FEN exam chạy qua Docker Compose / DockerOperator.',
 )
 p.write_text(text, encoding="utf-8")
 print("patched run_job.py aliases")

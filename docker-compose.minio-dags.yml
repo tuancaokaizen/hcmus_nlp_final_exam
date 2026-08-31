@@ -1,5 +1,5 @@
-# Overlay: Airflow reads DAGs from MinIO via sidecar sync (prod-like).
-# Overlay: Airflow đọc DAG từ MinIO qua sidecar sync (giống prod).
+# Overlay: Airflow reads DAGs from MinIO via sidecar sync.
+# Overlay: Airflow đọc DAG từ MinIO qua sidecar sync.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.minio-dags.yml up -d
 # Dev bind-mount only: make up-dev  (or FEN_DAG_SOURCE=local)
 
@@ -7,7 +7,7 @@ name: fen-exam
 
 services:
   airflow-dag-sync:
-    image: minio/mc:RELEASE.2024-12-18T13-15-44Z
+    image: minio/mc:latest
     depends_on:
       minio:
         condition: service_started

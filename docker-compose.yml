@@ -44,7 +44,7 @@ services:
       - minio-data:/data
 
   minio-init:
-    image: minio/mc:RELEASE.2024-12-18T13-15-44Z
+    image: minio/mc:latest
     depends_on:
       minio:
         condition: service_started
@@ -113,15 +113,20 @@ services:
       PADDLE_MAX_IMAGE_SIDE: "2400"
 
   selenium-chrome:
-    image: selenium/standalone-chrome:4.27.0
+    image: selenium/standalone-chrome:latest
     ports:
       - "4444:4444"
+      - "7900:7900"
     shm_size: "2gb"
     volumes:
       - selenium-profile:/data/chrome-profile
     environment:
       SE_NODE_MAX_SESSIONS: "2"
       SE_NODE_OVERRIDE_MAX_SESSIONS: "true"
+      # noVNC password for manual FB login / Mật khẩu noVNC khi login FB thủ công
+      SE_VNC_PASSWORD: secret
+      SE_START_VNC: "true"
+      SE_START_NO_VNC: "true"
 
   fen-job:
     profiles: ["job"]
@@ -141,6 +146,7 @@ services:
       PADDLE_SERVICE_URL: http://paddle-ocr:8080
     volumes:
       - ./dags:/opt/fen-exam/dags:ro
+      - ./output:/tmp/fen-output
     depends_on:
       - minio
       - paddle-ocr

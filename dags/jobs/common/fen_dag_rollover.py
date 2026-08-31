@@ -1,6 +1,6 @@
-"""Dump rollover: queue next dump while current DAG waits for OCR (RWO PVC).
+"""Dump rollover: queue next dump while current DAG waits for OCR.
 
-Rollover dump: dump lượt sau queued, DAG hiện tại chờ OCR xong rồi nhả PVC.
+Rollover dump: dump lượt sau queued, DAG hiện tại chờ OCR xong rồi chạy tiếp.
 """
 from __future__ import annotations
 

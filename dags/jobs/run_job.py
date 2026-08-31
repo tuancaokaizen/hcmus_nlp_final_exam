@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""CLI entrypoint for HVB v2 jobs running inside KubernetesPodOperator pods.
+"""CLI entrypoint for FEN exam jobs (Docker Compose / DockerOperator).
 
-Điểm vào CLI cho job HVB v2 chạy trong pod KubernetesPodOperator.
+Điểm vào CLI cho job FEN exam chạy qua Docker Compose / DockerOperator.
 """
 from __future__ import annotations
 
@@ -266,7 +266,7 @@ def _run_final_exam_nlp_crawl() -> None:
         download_images=download_images,
         merge_dataset=merge_dataset,
         debug_dom=debug_dom,
-        # Credentials come from the k8s secret, never from DAG params / Credential lấy từ secret k8s, không đặt trong DAG
+        # Credentials come from env/.env, never from DAG params / Credential lấy từ env/.env, không đặt trong DAG
         fb_username=os.environ.get("FB_USERNAME", "").strip(),
         fb_password=os.environ.get("FB_PASSWORD", "").strip(),
         fb_totp_secret=os.environ.get("FB_TOTP_SECRET", "").strip(),
@@ -668,15 +668,18 @@ def _run_final_exam_nlp_invalid_recheck() -> None:
 
 
 def _run_final_exam_nlp_bootstrap_login() -> None:
-    """One-shot login on selenium PVC profile; saves cookies to MinIO for fallback.
+    """One-shot login on selenium Chrome profile volume; saves cookies to MinIO for fallback.
 
-    Login một lần trên profile PVC selenium; lưu cookie MinIO làm fallback.
+    Login một lần trên profile Chrome (volume selenium); lưu cookie MinIO làm fallback.
+    Set FEN_MANUAL_LOGIN=true to wait for human login via noVNC (http://localhost:7900).
+    Đặt FEN_MANUAL_LOGIN=true để chờ người login qua noVNC.
     """
     import time
 
     from common.chau_ban_schema import utc_now_iso
     from common.io_storage import ensure_bucket, get_minio_client, upload_json_payload
     from final_exam_nlp_crawl_runner import (
+        FB_LOGIN_URL,
         _build_driver,
         _cookies_key,
         _is_logged_in,
@@ -686,6 +689,7 @@ def _run_final_exam_nlp_bootstrap_login() -> None:
         _safe_quit_driver,
         _selenium_preflight,
         _settings,
+        _wait_logged_in,
     )
 
     group_id = os.environ.get("FEN_GROUP_ID", "").strip()
@@ -698,26 +702,54 @@ def _run_final_exam_nlp_bootstrap_login() -> None:
     bucket = settings["bucket_raw"]
     source_prefix = settings["source_prefix"]
     remote_url = settings["selenium_remote_url"]
-    headless = _as_bool(os.environ.get("FEN_HEADLESS"), default=True)
+    manual_login = _as_bool(os.environ.get("FEN_MANUAL_LOGIN"), default=False)
+    # Manual login needs a visible browser (noVNC) / Login thủ công cần browser nhìn thấy được
+    headless = False if manual_login else _as_bool(os.environ.get("FEN_HEADLESS"), default=True)
     upload_minio = _as_bool(os.environ.get("FEN_UPLOAD_MINIO"), default=True)
     fb_username = os.environ.get("FB_USERNAME", "").strip()
     fb_password = os.environ.get("FB_PASSWORD", "").strip()
     fb_totp_secret = os.environ.get("FB_TOTP_SECRET", "").strip()
+    # How long to wait for human login via noVNC / Thời gian chờ người login qua noVNC
+    manual_wait_sec = int(os.environ.get("FEN_MANUAL_LOGIN_WAIT_SEC", "600").strip() or "600")
 
     _selenium_preflight(remote_url)
     driver = _build_driver(remote_url, headless, page_load_timeout=90)
     try:
         if _probe_profile_session(driver):
             print("[final_exam_nlp_bootstrap_login] profile already logged in", flush=True)
+        elif manual_login:
+            print(
+                "[final_exam_nlp_bootstrap_login] MANUAL LOGIN — open noVNC and sign in to Facebook",
+                flush=True,
+            )
+            print(
+                "[final_exam_nlp_bootstrap_login] noVNC: http://localhost:7900  password: secret",
+                flush=True,
+            )
+            try:
+                driver.get(FB_LOGIN_URL)
+            except Exception:
+                pass
+            print(
+                f"[final_exam_nlp_bootstrap_login] waiting up to {manual_wait_sec}s "
+                "for you to finish login (2FA OK)…",
+                flush=True,
+            )
+            if not _wait_logged_in(driver, manual_wait_sec):
+                raise RuntimeError(
+                    "Manual login timed out — finish Facebook login in noVNC "
+                    f"(http://localhost:7900) within {manual_wait_sec}s"
+                )
+            print("[final_exam_nlp_bootstrap_login] manual login detected", flush=True)
         elif fb_username and fb_password:
             print("[final_exam_nlp_bootstrap_login] profile empty — credential login", flush=True)
             _login_with_credentials(driver, fb_username, fb_password, fb_totp_secret)
         _require_logged_in_session(
             driver,
             had_cookies=False,
-            fb_username=fb_username,
-            fb_password=fb_password,
-            fb_totp_secret=fb_totp_secret,
+            fb_username="" if manual_login else fb_username,
+            fb_password="" if manual_login else fb_password,
+            fb_totp_secret="" if manual_login else fb_totp_secret,
             log_prefix="[final_exam_nlp_bootstrap_login]",
         )
         group_url = f"https://www.facebook.com/groups/{group_id}"
@@ -905,7 +937,7 @@ def _run_reindex_fen_qdrant() -> None:
 
 
 def main() -> None:
-    # Dispatch HVB v2 job by FEN_JOB env var / Điều phối job v2 theo biến FEN_JOB
+    # Dispatch FEN job by FEN_JOB env var / Điều phối job theo biến FEN_JOB
     os.environ.setdefault("FEN_CONFIG_PATH", "/opt/fen-exam/dags/config.ini")
     os.environ.setdefault("FEN_PATHS_OUTPUT_DIR", "/tmp/fen-output")
     os.environ.setdefault("FEN_SKIP_LOCAL_OUTPUT", "true")

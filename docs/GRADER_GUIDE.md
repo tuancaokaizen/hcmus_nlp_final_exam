@@ -1,6 +1,6 @@
 # Grader guide
 
-Checklist chấm bài pipeline exam (Docker Compose, không K8s).
+Checklist chấm bài pipeline exam (Docker Compose).
 
 Chi tiết artifact label dual: **[LABEL_DUAL_OUTPUT.md](LABEL_DUAL_OUTPUT.md)**.
 

@@ -23,37 +23,53 @@ def reset_api_key_pool() -> None:
 
 
 def collect_api_keys() -> list[str]:
-    """Ordered unique keys from FEN_API_KEY_01..12 then config env.
+    """Ordered unique keys from pool env, stage env, then config sections.
 
-    Key duy nhất theo thứ tự FEN_API_KEY_01..12 rồi env config.
+    Key duy nhất: pool env → stage env → section config.
     """
     global _POOL
     if _POOL is not None:
         return _POOL
     keys: list[str] = []
     seen: set[str] = set()
+
+    def _add(raw: str) -> None:
+        raw = (raw or "").strip()
+        if raw and raw not in seen:
+            seen.add(raw)
+            keys.append(raw)
+
     for i in range(1, 13):
-        raw = os.environ.get(f"FEN_API_KEY_{i:02d}", "").strip()
-        if raw and raw not in seen:
-            seen.add(raw)
-            keys.append(raw)
-    cfg = None
-    for env_name, section, option in (
-        ("FEN_ALIGN_API_KEY", "align", "api_key"),
-        ("FEN_GEMINI_OPENCV_API_KEY", "gemini_opencv", "api_key"),
+        _add(os.environ.get(f"FEN_API_KEY_{i:02d}", ""))
+    # Exam stage keys from .env / Key theo stage exam từ .env
+    for env_name in (
+        "FEN_ALIGN_API_KEY",
+        "FEN_GEMINI_OPENCV_API_KEY",
+        "FEN_LABEL_GEMINI_API_KEY",
+        "FEN_LABEL_GPT_API_KEY",
+        "FEN_LABEL_GLM_API_KEY",
+        "FEN_LABEL_DEEPSEEK_API_KEY",
+        "FEN_OCR_API_KEY",
+        "FEN_CALLIGRAPHY_API_KEY",
     ):
-        raw = os.environ.get(env_name, "").strip()
-        if not raw:
-            if cfg is None:
-                try:
-                    cfg = load_config()
-                except Exception:
-                    cfg = False
-            if cfg:
-                raw = get_value(cfg, section, option, fallback="").strip()
-        if raw and raw not in seen:
-            seen.add(raw)
-            keys.append(raw)
+        _add(os.environ.get(env_name, ""))
+    cfg = None
+    try:
+        cfg = load_config()
+    except Exception:
+        cfg = None
+    if cfg:
+        for section in (
+            "align",
+            "gemini_opencv",
+            "fen_label_gemini",
+            "fen_label_gpt",
+            "fen_label_glm",
+            "fen_label_deepseek",
+            "fen_ocr",
+            "fen_calligraphy",
+        ):
+            _add(get_value(cfg, section, "api_key", fallback=""))
     _POOL = keys
     return keys
 

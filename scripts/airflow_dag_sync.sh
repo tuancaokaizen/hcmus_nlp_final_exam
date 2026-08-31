@@ -1,6 +1,6 @@
 #!/bin/sh
-# Mirror Airflow DAGs from MinIO bucket into shared volume (prod-like).
-# Mirror DAG Airflow từ bucket MinIO vào volume dùng chung (giống prod).
+# Mirror Airflow DAGs from MinIO bucket into shared volume.
+# Mirror DAG Airflow từ bucket MinIO vào volume dùng chung.
 set -eu
 
 ENDPOINT="${FEN_MINIO_ENDPOINT:-http://minio:9000}"

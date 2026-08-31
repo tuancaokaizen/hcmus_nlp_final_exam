@@ -24,6 +24,10 @@ echo
 
 upsert() {
   local key="$1" val="$2"
+  # Quote values that contain spaces / Quote giá trị có khoảng trắng
+  if [[ "$val" == *" "* ]]; then
+    val="\"${val}\""
+  fi
   if grep -q "^${key}=" "$ENV_FILE"; then
     # macOS sed
     sed -i.bak "s|^${key}=.*|${key}=${val}|" "$ENV_FILE" && rm -f "${ENV_FILE}.bak"

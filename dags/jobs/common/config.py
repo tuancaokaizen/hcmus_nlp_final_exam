@@ -30,7 +30,7 @@ def get_output_dir() -> Path:
     if path.is_absolute():
         resolved = path
     elif os.environ.get("FEN_CONFIG_PATH", "").startswith("/workspace"):
-        # K8s job pod synced from MinIO / Pod job K8s sync code từ MinIO
+        # Job container may load config synced from MinIO / Container job có thể đọc config sync từ MinIO
         resolved = Path("/tmp/fen-output")
     elif os.environ.get("FEN_JOB"):
         resolved = Path("/tmp/fen-output")

@@ -1,6 +1,6 @@
 # FEN NLP Exam Pipeline (Docker)
 
-Reproducible **crawl → calligraphy classify → download → label dual OCR** demo for the HCMUS NLP final exam, **Docker Compose only** (no Kubernetes).
+Reproducible **crawl → calligraphy classify → download → label dual OCR** demo for the HCMUS NLP final exam, **Docker Compose only**.
 
 ## Requirements
 
@@ -167,7 +167,7 @@ DAG source:
 
 | Mode | Setting | Airflow reads DAGs from |
 |------|---------|-------------------------|
-| Prod-like (default) | `FEN_DAG_SOURCE=minio` | MinIO → sidecar → volume |
+| Default | `FEN_DAG_SOURCE=minio` | MinIO → sidecar → volume |
 | Dev fast | `FEN_DAG_SOURCE=local` or `make up-dev` | Bind mount `./dags` |
 
 ---
@@ -193,7 +193,7 @@ facebook/{group_id}/
   ocr/queue/ … (legacy fen_ocr only)
 ```
 
-**Label dual notes:** `ocr_limit` / `label_limit` caps **pending images** (`0` = full queue). **`flush_posts`** (default **5**) = upsert jsonl every N images. Done pages skipped unless `force=true`. Artifacts: **`task_b2.jsonl`**, **`task_b2.xlsx`**, **`summary.json`**, **`glm/recommend.jsonl`** (`fuse_gt`).
+**Label dual notes:** `ocr_limit` / `label_limit` caps **pending images** (`0` = full queue). **`flush_posts`** (default **5**) = upsert jsonl every N images. Done pages skipped unless `force=true`. Artifacts: MinIO **`task_b2.jsonl`** (có `side_matter`); local submit **`output/{group_id}/task_b2.jsonl` + `.xlsx`** — thuần 5 cột, **không** `side_matter`.
 
 ### `batch_target` vs `ocr_limit` vs `flush_posts`
 
@@ -225,7 +225,7 @@ facebook/{group_id}/
 | `make verify` | Check E2E pipeline artifacts on MinIO |
 | `make e2e` | `deploy` + `fb-login`, then trigger `fen_e2e_pipeline` in UI |
 | `make build` | Rebuild all images |
-| `make sync` | Copy jobs from upstream repo (if missing) |
+| `make sync` | Đồng bộ/transform job code (optional) |
 | `make up-dev` | Compose with `./dags` bind mount only (no MinIO DAG sync) |
 
 ---

@@ -1,6 +1,6 @@
 # Crawl state & checkpoints
 
-Exam repo reuses the production crawl state pattern under `facebook/{group_id}/crawl/` (not `v5/`).
+Exam repo stores crawl checkpoints under `facebook/{group_id}/crawl/`.
 
 ## Files on MinIO (`final-exam-nlp-raw`)
 
