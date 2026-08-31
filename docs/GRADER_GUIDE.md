@@ -9,8 +9,8 @@ Chi tiết artifact label dual: **[LABEL_DUAL_OUTPUT.md](LABEL_DUAL_OUTPUT.md)**
 ## 1. Infrastructure
 
 1. `docker compose ps` — `minio`, `postgres`, `airflow-webserver`, `airflow-scheduler`, `paddle-ocr` running.
-2. MinIO http://localhost:9001 — buckets `airflow`, `final-exam-nlp-raw`.
-3. Airflow http://localhost:8080 — DAGs:
+2. MinIO http://localhost:9001 (`admin` / `admin1234`) — buckets `airflow`, `final-exam-nlp-raw`.
+3. Airflow http://localhost:8080 (`admin` / `admin`) — DAGs:
    - `fen_e2e_pipeline`
    - `fen_crawl_pipeline`
    - **`fen_label_dual_pipeline`**
