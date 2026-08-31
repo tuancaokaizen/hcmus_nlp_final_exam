@@ -1,6 +1,6 @@
 # Local setup log — build → cookies
 
-Ghi lại các bước setup trên máy Apple Silicon (Docker Desktop). Giá trị mặc định local giữ nguyên; **chỉ điền riêng** tài khoản Facebook và API key (không commit `.env`).
+Ghi lại các bước setup local với Docker Compose. Giá trị mặc định giữ nguyên; **chỉ điền riêng** tài khoản Facebook và API key (không commit `.env`).
 
 **Người mới:** đọc checklist ngắn ở [USER_SETUP.md](USER_SETUP.md) trước; file này bổ sung chi tiết + lỗi thường gặp.
 
@@ -60,11 +60,11 @@ make config             # sinh dags/config.ini từ .env
 
 | Vấn đề | Cách xử lý |
 |--------|------------|
-| `scripts/up.sh` lỗi `mapfile` (bash 3.2 macOS) | Ghép `-f` compose trực tiếp với path quoted |
+| `scripts/up.sh` lỗi `mapfile` (bash cũ / macOS bash 3.2) | Ghép `-f` compose trực tiếp với path quoted |
 | Path có space làm vỡ `-f` compose | Dùng `"$ROOT/docker-compose.yml"` |
 | Docker Hub timeout / mirror `gcr.io` | Restart Docker Desktop; tắt proxy/registry mirror nếu cần |
 | `minio/mc:RELEASE.2024-12-18...` **not found** | Dùng `minio/mc:latest` |
-| `selenium/standalone-chrome:4.27.0` không có arm64 | Dùng `selenium/standalone-chrome:latest` |
+| Tag Selenium cố định thiếu image trên một số host | Dùng `selenium/standalone-chrome:latest` |
 | Paddle thiếu `block_merge.py` / `text_layout.py` | Dockerfile copy đủ 3 file + rebuild |
 | Paddle crash `paddlepaddle is not installed` | Dockerfile cài `paddlepaddle==3.2.2` rồi `requirements.txt` |
 
@@ -134,7 +134,7 @@ Nếu login OK nhưng upload fail `SignatureDoesNotMatch`: `make config` rồi c
 ## 5. File liên quan (trong repo)
 
 - `.env` / `.env.example` — quote `FEN_HOST_PROJECT_DIR`; MinIO `admin` / `admin1234`
-- `scripts/up.sh` — bash 3.2 + path có space
+- `scripts/up.sh` — tương thích bash cũ + path có space
 - `docker-compose.yml` — `minio/mc:latest`, selenium `latest`, port `7900`, VNC env
 - `docker-compose.minio-dags.yml` — `minio/mc:latest`
 - `docker/paddle-ocr/Dockerfile` — copy `app.py`, `block_merge.py`, `text_layout.py`

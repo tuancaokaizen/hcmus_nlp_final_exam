@@ -36,15 +36,15 @@ Rồi mở Airflow → unpause **`fen_e2e_pipeline`** → Trigger với JSON:
 | MinIO | http://localhost:9001 — `admin` / `admin1234` |
 | noVNC (FB login) | http://localhost:7900 — password `secret` |
 
-Chi tiết macOS / lỗi thường gặp: **[docs/LOCAL_SETUP_LOG.md](docs/LOCAL_SETUP_LOG.md)**.  
+Chi tiết lỗi thường gặp / noVNC: **[docs/LOCAL_SETUP_LOG.md](docs/LOCAL_SETUP_LOG.md)**.  
 Hướng dẫn tiếng Việt đầy đủ: **[docs/USER_SETUP.md](docs/USER_SETUP.md)**.
 
 ---
 
 ## Requirements
 
-- Docker Desktop (Compose v2)
-- Host tool [`mc`](https://min.io/docs/minio/linux/reference/minio-mc.html) — MinIO CLI; `make up` / `make deploy` cần khi `FEN_DAG_SOURCE=minio` (mặc định). macOS: `brew install minio/stable/mc`
+- Docker + Docker Compose v2
+- Host tool [`mc`](https://min.io/docs/minio/linux/reference/minio-mc.html) — MinIO CLI; `make up` / `make deploy` cần khi `FEN_DAG_SOURCE=minio` (mặc định)
 - Ramcloud API keys (đặt trong `.env`, không commit)
 - Facebook account cho crawl (login tay qua noVNC nếu có 2FA)
 
@@ -288,7 +288,7 @@ facebook/{group_id}/
 
 ## Docs
 
-- **[Quick local setup (VN / macOS)](docs/LOCAL_SETUP_LOG.md)** — `.env`, `make up`, noVNC login
+- **[Quick local setup](docs/LOCAL_SETUP_LOG.md)** — `.env`, `make up`, noVNC login
 - **[User setup & trigger config](docs/USER_SETUP.md)**
 - **[Label dual — output, upsert, flush](docs/LABEL_DUAL_OUTPUT.md)**
 - [Pipeline build, deploy & E2E](docs/PIPELINE_BUILD_DEPLOY_RUN.md)

@@ -2,14 +2,14 @@
 
 Hướng dẫn cài đặt và chạy pipeline exam: **crawl → calligraphy gate → download → label dual OCR** (Gemini ∥ Paddle → fuse → GLM).
 
-- Setup lần đầu / macOS: **[LOCAL_SETUP_LOG.md](LOCAL_SETUP_LOG.md)**
+- Setup lần đầu: **[LOCAL_SETUP_LOG.md](LOCAL_SETUP_LOG.md)**
 - Chi tiết file output: **[LABEL_DUAL_OUTPUT.md](LABEL_DUAL_OUTPUT.md)**
 
 ---
 
 ## Lần đầu (checklist)
 
-1. Cài **Docker Desktop** + (khuyến nghị) `mc`: `brew install minio/stable/mc`
+1. Cài **Docker** + Docker Compose v2 + (khuyến nghị) MinIO client [`mc`](https://min.io/docs/minio/linux/reference/minio-mc.html) trên host
 2. Clone repo → `cp .env.example .env` → `make configure`
 3. Mở `.env`, điền **`FEN_LABEL_GEMINI_API_KEY`**, **`FEN_LABEL_GPT_API_KEY`**, **`FEN_LABEL_GLM_API_KEY`** (wizard chỉ hỏi calligraphy + OCR — có thể copy cùng key Ramcloud)
 4. `make config` → `make up` (lần đầu build có thể 10–20 phút)
