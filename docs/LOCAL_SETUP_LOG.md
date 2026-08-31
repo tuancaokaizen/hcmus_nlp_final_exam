@@ -2,6 +2,8 @@
 
 Ghi lại các bước setup trên máy Apple Silicon (Docker Desktop). Giá trị mặc định local giữ nguyên; **chỉ điền riêng** tài khoản Facebook và API key (không commit `.env`).
 
+**Người mới:** đọc checklist ngắn ở [USER_SETUP.md](USER_SETUP.md) trước; file này bổ sung chi tiết + lỗi thường gặp.
+
 ## 0. Tạo file `.env`
 
 `.env` **không có sẵn trong git** — mỗi máy tự tạo từ template `.env.example`.

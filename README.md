@@ -2,12 +2,51 @@
 
 Reproducible **crawl → calligraphy classify → download → label dual OCR** demo for the HCMUS NLP final exam, **Docker Compose only**.
 
+## Quick start (newcomers)
+
+Làm lần lượt — khoảng 15–30 phút lần đầu (build image có thể lâu hơn):
+
+```bash
+git clone https://github.com/tuancaokaizen/hcmus_nlp_final_exam.git
+cd hcmus_nlp_final_exam
+git checkout main && git pull
+cp .env.example .env
+make configure          # FB (optional) + 2 API key; điền thêm FEN_LABEL_* trong .env
+# Mở .env: copy cùng Ramcloud key vào FEN_LABEL_GEMINI/GPT/GLM/DEEPSEEK nếu wizard không hỏi
+make up                 # lần đầu: build + start stack (có thể 10–20 phút)
+make fb-login-manual    # mở http://localhost:7900 (pass: secret) → login FB tay → cookies MinIO
+```
+
+Rồi mở Airflow → unpause **`fen_e2e_pipeline`** → Trigger với JSON:
+
+```json
+{
+  "group_id": "322453387859386",
+  "batch_target": 10,
+  "reset_crawl_data": true,
+  "ocr_limit": 3
+}
+```
+
+`ocr_limit: 3` = smoke test rẻ. Full queue: bỏ `ocr_limit` hoặc `"ocr_limit": 0`.
+
+| URL | Login |
+|-----|-------|
+| Airflow | http://localhost:8080 — `admin` / `admin` |
+| MinIO | http://localhost:9001 — `admin` / `admin1234` |
+| noVNC (FB login) | http://localhost:7900 — password `secret` |
+
+Chi tiết macOS / lỗi thường gặp: **[docs/LOCAL_SETUP_LOG.md](docs/LOCAL_SETUP_LOG.md)**.  
+Hướng dẫn tiếng Việt đầy đủ: **[docs/USER_SETUP.md](docs/USER_SETUP.md)**.
+
+---
+
 ## Requirements
 
-- Docker + Docker Compose v2
-- [`mc`](https://min.io/docs/minio/linux/reference/minio-mc.html) (MinIO client) on the host — used by `make up` / `make deploy` when `FEN_DAG_SOURCE=minio`
-- Ramcloud API keys: **separate** per stage — calligraphy (`FEN_CALLIGRAPHY_API_KEY`), label dual (`FEN_LABEL_*`), legacy OCR (`FEN_OCR_API_KEY`)
-- Facebook credentials for live crawl (optional until you run crawl)
+- Docker Desktop (Compose v2)
+- Host tool [`mc`](https://min.io/docs/minio/linux/reference/minio-mc.html) — MinIO CLI; `make up` / `make deploy` cần khi `FEN_DAG_SOURCE=minio` (mặc định). macOS: `brew install minio/stable/mc`
+- Ramcloud API keys (đặt trong `.env`, không commit)
+- Facebook account cho crawl (login tay qua noVNC nếu có 2FA)
 
 ---
 
@@ -15,7 +54,7 @@ Reproducible **crawl → calligraphy classify → download → label dual OCR** 
 
 ### 1. First-time setup
 
-> **Branch:** use **`main`** only. Do not checkout feature branches for the exam pipeline.
+> **Branch:** dùng **`main`** khi chấm / nộp. Nhánh `features/*` chỉ cho dev.
 
 ```bash
 git clone https://github.com/tuancaokaizen/hcmus_nlp_final_exam.git
@@ -23,9 +62,11 @@ cd hcmus_nlp_final_exam
 git checkout main
 git pull origin main
 cp .env.example .env
-make configure          # wizard: FB creds + API keys; sets FEN_HOST_PROJECT_DIR
-make up                 # workspace + images + stack + buckets + deploy DAGs + Airflow
-make fb-login           # save FB cookies to MinIO (needed before crawl)
+make configure          # wizard: FB + calligraphy/OCR keys; sets FEN_HOST_PROJECT_DIR
+# Điền FEN_LABEL_*_API_KEY trong .env (cần cho label dual), rồi:
+make config
+make up
+make fb-login-manual    # khuyến nghị nếu có 2FA; hoặc make fb-login nếu có FB_TOTP_SECRET
 ```
 
 **Update an existing clone:**
@@ -39,7 +80,7 @@ make deploy             # after DAG/job changes
 | URL | Login |
 |-----|-------|
 | Airflow | http://localhost:8080 — `admin` / `admin` |
-| MinIO console | http://localhost:9001 — `admin` / `admin` |
+| MinIO console | http://localhost:9001 — `admin` / `admin1234` |
 
 Force rebuild all images (slow, first clone or after Dockerfile changes):
 
@@ -93,13 +134,15 @@ Optional: `"ocr_limit": 5` to cap images; `"flush_posts": 10` to change upsert i
 ```json
 {
   "group_id": "322453387859386",
-  "batch_seq": 1,
+  "batch_seq": 0,
   "label_limit": 0,
   "prepare_queues": true,
   "glm": true,
   "force": false
 }
 ```
+
+`batch_seq`: **`0`** = mọi quote queue (khuyến nghị sau crawl). `1`–`12` = chỉ một shard.
 
 Output: MinIO `facebook/{group_id}/ocr/label_dual_pilot/task_b2.jsonl` and `glm/recommend.jsonl` (field **`fuse_gt`**).
 
@@ -135,7 +178,7 @@ Checks MinIO for crawl artifacts + optional `ocr/label_dual_pilot/task_b2.jsonl`
 | Command | Containers | Data (volumes) | When to use |
 |---------|------------|----------------|-------------|
 | **`make down`** | Stopped & removed | **Kept** — MinIO artifacts, Postgres, FB profile, DAG cache | Pause work; resume with `make up` |
-| **`make down-v`** | Stopped & removed | **Deleted** — all named volumes wiped | Clean slate; then `make up` + `make fb-login` again |
+| **`make down-v`** | Stopped & removed | **Deleted** — all named volumes wiped | Clean slate; then `make up` + login FB again |
 
 **`make down` does not delete:** repo files (`.env`, `dags/`, `config.ini`), Docker images.
 
@@ -146,7 +189,7 @@ Typical reset:
 ```bash
 make down-v
 make up
-make fb-login
+make fb-login-manual
 # trigger DAG with reset_crawl_data: true
 ```
 
@@ -221,7 +264,8 @@ facebook/{group_id}/
 | `make down-v` | Stop stack; **wipe** volumes (fresh MinIO + DB) |
 | `make bootstrap` | `FEN_UP_BUILD=always make up` |
 | `make deploy` | Buckets + mirror DAGs to MinIO + rebuild `fen-job` |
-| `make fb-login` | Save FB cookies to MinIO |
+| `make fb-login` | Auto FB login (cần `FB_PASSWORD` / TOTP) → cookies MinIO |
+| `make fb-login-manual` | Login tay qua noVNC `:7900` → cookies MinIO (khuyến nghị nếu 2FA) |
 | `make verify` | Check E2E pipeline artifacts on MinIO |
 | `make e2e` | `deploy` + `fb-login`, then trigger `fen_e2e_pipeline` in UI |
 | `make build` | Rebuild all images |
@@ -238,14 +282,15 @@ facebook/{group_id}/
 - `FEN_CATCH_BOTTOM=true` — hint in `.env`; use DAG param `catch_bottom` at trigger on `fen_crawl_pipeline`
 - `FEN_DEMO_MODE` — deprecated alias for `catch_bottom=false`
 
-**DAG param defaults (at trigger):** see table in [User setup — batch_target vs ocr_limit](docs/USER_SETUP.md#batch_target-vs-ocr_limit-read-this-first).
+**DAG param defaults (at trigger):** see table in [User setup](docs/USER_SETUP.md).
 
 ---
 
 ## Docs
 
-- **[Label dual — output, upsert, flush](docs/LABEL_DUAL_OUTPUT.md)** ⭐
-- [User setup & trigger config](docs/USER_SETUP.md)
+- **[Quick local setup (VN / macOS)](docs/LOCAL_SETUP_LOG.md)** — `.env`, `make up`, noVNC login
+- **[User setup & trigger config](docs/USER_SETUP.md)**
+- **[Label dual — output, upsert, flush](docs/LABEL_DUAL_OUTPUT.md)**
 - [Pipeline build, deploy & E2E](docs/PIPELINE_BUILD_DEPLOY_RUN.md)
 - [Crawl state & checkpoints](docs/CRAWL_STATE.md)
 - [Grader guide](docs/GRADER_GUIDE.md)
