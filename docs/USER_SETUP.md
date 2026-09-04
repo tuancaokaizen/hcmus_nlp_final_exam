@@ -1,22 +1,65 @@
 # User setup
 
-Hướng dẫn cài đặt và chạy pipeline exam: **crawl → calligraphy gate → download → label dual OCR** (Gemini ∥ Paddle → fuse → GLM).
+Hướng dẫn cài và chạy pipeline exam (tiếng Việt): **crawl → gate thư pháp → download → label dual OCR**.
 
-- Setup lần đầu: **[LOCAL_SETUP_LOG.md](LOCAL_SETUP_LOG.md)**
-- Chi tiết file output: **[LABEL_DUAL_OUTPUT.md](LABEL_DUAL_OUTPUT.md)**
+- Lỗi / noVNC chi tiết: **[LOCAL_SETUP_LOG.md](LOCAL_SETUP_LOG.md)**
+- File output B2 + **vai trò từng model OCR**: **[LABEL_DUAL_OUTPUT.md](LABEL_DUAL_OUTPUT.md)** (§0)
+- README ngắn (EN/VI mix): **[../README.md](../README.md)**
+
+---
+
+## Đọc nhanh: từng model OCR làm gì?
+
+| Model | Việc |
+|-------|------|
+| **Gemini** | Nhánh A — OCR vision chính → cột `gemini` |
+| **Paddle** | Nhánh B — OCR local, song song Gemini |
+| **GPT** | Refine từng nhánh trước khi fuse |
+| **DeepSeek** | Optional — thứ tự cột / layout |
+| **Fuse** | Ghép A∥B → `ground_truth` nộp |
+| **GLM** | Judge QC → silver / cần HITL (`fuse_gt`) |
+| **Calligraphy (Gemini)** | Chỉ gate crawl (thư pháp?) — **không** phải OCR B2 |
+
+Chi tiết + sơ đồ: **[LABEL_DUAL_OUTPUT.md §0](LABEL_DUAL_OUTPUT.md#0-công-dụng-từng-mô-hình-ocr--label-dual)**.
+
+---
+
+## Đọc nhanh: DAG là gì?
+
+Bạn **không** cần đổi tên DAG. Nhớ bảng này:
+
+| DAG | Nghĩa dễ hiểu | Bắt đáy? |
+|-----|----------------|----------|
+| **`fen_e2e_pipeline`** | **Một batch** crawl + OCR full path — **bắt đầu ở đây** | **Không** (không có param `catch_bottom`) |
+| **`fen_crawl_pipeline`** | Crawl (có thể nhiều batch) + tự gọi OCR | **Có** — mặc định `true` (rollover tới `bottom_year`) |
+| **`fen_label_dual_pipeline`** | Chỉ OCR khi đã có ảnh trên MinIO | — |
+| `fen_ocr_pipeline` | Legacy — bỏ qua nếu làm B2 mới | — |
+
+`e2e` = end-to-end (cùng DAG làm hết crawl→OCR), **không** có nghĩa “chạy production bắt đáy”.  
+Muốn một batch trên `fen_crawl_pipeline` → set `"catch_bottom": false`.
+
+Luồng bên trong mỗi lần crawl:
+
+```
+discover → enrich → download → (label dual)
+  posts     valid?     ảnh        OCR B2
+```
+
+- Post đã **seen** → skip crawl lại.  
+- Ảnh đã OCR (có page) → skip (trừ `force: true`).
 
 ---
 
 ## Lần đầu (checklist)
 
-1. Cài **Docker** + Docker Compose v2 + (khuyến nghị) MinIO client [`mc`](https://min.io/docs/minio/linux/reference/minio-mc.html) trên host
-2. Clone repo → `cp .env.example .env` → `make configure`
-3. Mở `.env`, điền **`FEN_LABEL_GEMINI_API_KEY`**, **`FEN_LABEL_GPT_API_KEY`**, **`FEN_LABEL_GLM_API_KEY`** (wizard chỉ hỏi calligraphy + OCR — có thể copy cùng key Ramcloud)
+1. Cài **Docker** + Compose v2 + (khuyến nghị) [`mc`](https://min.io/docs/minio/linux/reference/minio-client/minio-mc.html)
+2. Clone **`main`** → `cp .env.example .env` → `make configure`
+3. Mở `.env`, điền **`FEN_LABEL_GEMINI_API_KEY`**, **`FEN_LABEL_GPT_API_KEY`**, **`FEN_LABEL_GLM_API_KEY`** (wizard chỉ hỏi calligraphy + OCR — copy cùng key Ramcloud được)
 4. `make config` → `make up` (lần đầu build có thể 10–20 phút)
-5. `make fb-login-manual` → mở http://localhost:7900 (pass `secret`) → login Facebook tay
-6. Airflow http://localhost:8080 (`admin`/`admin`) → unpause **`fen_e2e_pipeline`** → Trigger
+5. `make fb-login-manual` → http://localhost:7900 (pass `secret`) → login Facebook
+6. Airflow http://localhost:8080 (`admin`/`admin`) → **unpause** `fen_e2e_pipeline` → **Trigger**
 
-Smoke JSON (rẻ API):
+Smoke (rẻ API):
 
 ```json
 {
@@ -29,109 +72,92 @@ Smoke JSON (rẻ API):
 
 | URL | Login |
 |-----|-------|
-| Airflow | http://localhost:8080 — `admin` / `admin` |
-| MinIO | http://localhost:9001 — `admin` / `admin1234` |
-| noVNC | http://localhost:7900 — `secret` |
+| Airflow | `admin` / `admin` |
+| MinIO `:9001` | `admin` / `admin1234` |
+| noVNC `:7900` | `secret` |
 
 ---
 
 ## 1. Clone & configure
 
-> **Nhánh dùng cho thi / chấm:** **`main`** — không checkout nhánh `features/*`.
+> Nhánh chấm / nộp: **`main`**. Không dùng `features/*` khi chấm.
 
 ```bash
 git clone https://github.com/tuancaokaizen/hcmus_nlp_final_exam.git
 cd hcmus_nlp_final_exam
-git checkout main
-git pull origin main
+git checkout main && git pull origin main
 cp .env.example .env
 make configure
 ```
 
-**Wizard hỏi gì?** Facebook (có thể Enter bỏ qua) + `FEN_CALLIGRAPHY_API_KEY` + `FEN_OCR_API_KEY`.  
-**Bạn vẫn phải điền tay** các `FEN_LABEL_*_API_KEY` trong `.env`, rồi `make config`.
+**Wizard hỏi:** Facebook (Enter = bỏ qua) + `FEN_CALLIGRAPHY_API_KEY` + `FEN_OCR_API_KEY`.  
+**Phải điền tay:** các `FEN_LABEL_*_API_KEY`, rồi `make config`.
 
-| Key trong `.env` | Dùng cho |
-|------------------|----------|
+| Key `.env` | Dùng cho |
+|------------|----------|
 | `FEN_CALLIGRAPHY_API_KEY` | Enrich — gate thư pháp |
 | `FEN_LABEL_GEMINI_API_KEY` | Label dual — vision |
-| `FEN_LABEL_GPT_API_KEY` | Label dual — GPT track |
+| `FEN_LABEL_GPT_API_KEY` | Label dual — GPT |
 | `FEN_LABEL_GLM_API_KEY` | Label dual — GLM / `fuse_gt` |
 | `FEN_LABEL_DEEPSEEK_API_KEY` | Label dual (optional) |
-| `FEN_OCR_API_KEY` | Chỉ **legacy** `fen_ocr_pipeline` |
+| `FEN_OCR_API_KEY` | Chỉ legacy `fen_ocr_pipeline` |
 
-`configure` set `FEN_HOST_PROJECT_DIR` = đường dẫn tuyệt đối repo (bắt buộc; path có space → giữ quote).
+`configure` set `FEN_HOST_PROJECT_DIR` = path tuyệt đối repo (path có space → giữ quote).
 
-**Đã clone rồi — cập nhật code:**
+Đã clone — chỉ cập nhật:
 
 ```bash
-git checkout main
-git pull origin main
+git checkout main && git pull origin main
 make config && make deploy
 ```
 
 ---
 
-## 2. Bootstrap stack
+## 2. Bật stack + login FB
 
 ```bash
-make up                 # dirs + config.ini + compose + buckets + deploy DAGs + Airflow
-make fb-login-manual    # khuyến nghị nếu có 2FA
-# hoặc: make fb-login   # nếu đã điền FB_PASSWORD (+ TOTP)
+make up
+make fb-login-manual    # khuyến nghị nếu 2FA
+# hoặc: make fb-login   # nếu đã có FB_PASSWORD (+ TOTP)
 ```
 
-Force rebuild images:
+Force rebuild image: `make bootstrap`.
 
-```bash
-make bootstrap   # = FEN_UP_BUILD=always make up
-```
-
-| Mode | Setting | Khi nào |
-|------|---------|---------|
-| Default | `FEN_DAG_SOURCE=minio` | Chấm / máy mới (cần `mc`) |
-| Dev | `make up-dev` | Sửa DAG thường xuyên, không cần sync MinIO |
+| Mode | Khi nào |
+|------|---------|
+| Default (`FEN_DAG_SOURCE=minio`) | Chấm / máy mới (cần `mc`) |
+| `make up-dev` | Sửa DAG thường xuyên |
 
 ---
 
-## 3. Vòng test hàng ngày
+## 3. Vòng làm việc hàng ngày
 
 ```bash
 make up
 make deploy      # sau khi sửa DAG/job
-# Airflow UI → unpause → Trigger DAG
+# Airflow → unpause → Trigger
 make verify
 ```
 
 ---
 
-## 4. Chọn DAG nào?
+## 4. Trigger config (Configuration JSON)
 
-| DAG | Mô tả ngắn |
-|-----|-------------|
-| **`fen_e2e_pipeline`** | Một lần: crawl batch → label dual (không rollover) — **bắt đầu ở đây** |
-| **`fen_crawl_pipeline`** | Crawl nhiều batch + auto label dual; `catch_bottom` mặc định `true` (lâu) |
-| **`fen_label_dual_pipeline`** | Chỉ label dual (đã crawl xong) |
-| `fen_ocr_pipeline` | Legacy OCR — không dùng cho B2 mới |
-
-Với `fen_crawl_pipeline` lần đầu: set `"catch_bottom": false` để chỉ một batch.
-
----
-
-## 5. Trigger config (Configuration JSON)
-
-### `batch_target` vs `ocr_limit` vs `flush_posts`
+### Tham số dễ nhầm
 
 | Param | Giai đoạn | Đơn vị | Default |
 |-------|-----------|--------|---------|
-| **`batch_target`** | Crawl discover | **post** / batch | `10` |
-| **`ocr_limit`** | Label dual | **ảnh** pending tối đa; `0` = full queue | `0` |
-| **`flush_posts`** | Label dual | Upsert jsonl mỗi N **ảnh** | `5` |
+| **`batch_target`** | Discover | **post** / batch | `10` |
+| **`ocr_limit`** | Label dual (e2e / crawl) | **ảnh** pending; `0` = full | `0` |
+| **`label_limit`** | Label dual DAG | giống `ocr_limit` | `0` |
+| **`flush_posts`** | Label dual | upsert mỗi N **ảnh** | `5` |
+| **`catch_bottom`** | **Chỉ** `fen_crawl_pipeline` | bool | `true` |
+| **`reset_crawl_data`** | Crawl | xóa state crawl, giữ cookies | `false` |
+| **`force`** | Label dual | OCR lại ảnh đã xong | `false` |
 
-- **`ocr_limit=0`**: xử lý hết queue pending.
-- **`ocr_limit=3`**: smoke test — chỉ vài ảnh đầu.
-- Ảnh đã label xong được **skip** (trừ `force: true`).
+Không có `batch_size` — dùng **`batch_target`**.
 
-### `fen_e2e_pipeline`
+### `fen_e2e_pipeline` — một batch, không bắt đáy
 
 ```json
 {
@@ -144,10 +170,11 @@ Với `fen_crawl_pipeline` lần đầu: set `"catch_bottom": false` để chỉ
 }
 ```
 
-- `batch_seq`: không cần — e2e OCR hết quote queue (`batch_seq=0` nội bộ)
-- `reset_crawl_data`: xóa state crawl (giữ cookies)
+- Luôn chỉ **một** batch discover theo `batch_target`, rồi enrich → download → label dual.
+- Không có `catch_bottom` / rollover.
+- OCR dùng hết quote queue nội bộ (`batch_seq=0`); không cần truyền `batch_seq`.
 
-### `fen_crawl_pipeline`
+### `fen_crawl_pipeline` — crawl + (tuỳ chọn) bắt đáy
 
 ```json
 {
@@ -160,10 +187,12 @@ Với `fen_crawl_pipeline` lần đầu: set `"catch_bottom": false` để chỉ
 }
 ```
 
-- **`catch_bottom`**: default `true` = bắt đáy đến `bottom_year` (có thể rất lâu); `false` = một batch rồi dừng
-- Sau download → tự trigger **`fen_label_dual_pipeline`**
+- **`catch_bottom: false`** — giống tinh thần e2e về số batch crawl: **một** batch rồi dừng.
+- **`catch_bottom: true`** (mặc định) — sau mỗi batch, cooldown rồi **trigger lại** crawl tới `bottom_year` (2013) hoặc hết feed → **lâu**.
+- Sau download → tự trigger **`fen_label_dual_pipeline`**.
+- `demo_mode: true` (cũ) = `catch_bottom: false`.
 
-### `fen_label_dual_pipeline`
+### `fen_label_dual_pipeline` — chỉ OCR
 
 ```json
 {
@@ -177,17 +206,29 @@ Với `fen_crawl_pipeline` lần đầu: set `"catch_bottom": false` để chỉ
 }
 ```
 
-`batch_seq`: **0** = mọi quote queue 1–12 (khuyến nghị). `1`–`12` = chỉ một shard (dễ chạy nhầm queue rỗng nếu ít ảnh).
+- `batch_seq: 0` = mọi queue 1–12 (khuyến nghị). `1`–`12` = một shard (dễ rỗng nếu ít ảnh).
+- Output: `ocr/label_dual_pilot/task_b2.jsonl` (+ `.xlsx`), `glm/recommend.jsonl` (`fuse_gt`).
+- Nộp local: `output/{group_id}/task_b2.jsonl` + `.xlsx`.
 
-**Output:** `ocr/label_dual_pilot/task_b2.jsonl`, `task_b2.xlsx`, `glm/recommend.jsonl` (`fuse_gt`).
+---
+
+## 5. Valid / invalid (tóm tắt)
+
+Post **valid** khi:
+
+1. Có caption thật (không phải UI Facebook) + ≥ 1 URL **ảnh** (video không tính → `missing_image`).
+2. Gate thư pháp: ≥ 1 ảnh **handwritten / mixed** (không nhận printed-only / spam).
+3. Xuất B1: thêm ảnh đã tải về MinIO.
+
+Chi tiết reason: xem log enrich / `invalid_post.jsonl`.
 
 ---
 
 ## 6. Facebook login
 
 ```bash
-make fb-login-manual   # noVNC :7900 — khuyến nghị khi có 2FA
-make fb-login          # auto (cần password / TOTP trong .env)
+make fb-login-manual   # noVNC :7900
+make fb-login          # auto nếu có password/TOTP trong .env
 ```
 
 ---
@@ -198,7 +239,7 @@ make fb-login          # auto (cần password / TOTP trong .env)
 make deploy
 ```
 
-Job Python đổi nhiều: `FEN_UP_BUILD=always make up`
+Đổi nhiều job Python: `FEN_UP_BUILD=always make up`
 
 ---
 
@@ -207,7 +248,7 @@ Job Python đổi nhiều: `FEN_UP_BUILD=always make up`
 | Command | Data |
 |---------|------|
 | `make down` | Giữ MinIO, Postgres, cookies |
-| `make down-v` | Xóa hết volumes — cần login FB lại |
+| `make down-v` | Xóa volumes — login FB lại |
 
 ```bash
 make down-v && make up && make fb-login-manual

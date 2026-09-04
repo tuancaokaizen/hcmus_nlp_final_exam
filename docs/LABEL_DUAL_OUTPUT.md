@@ -4,6 +4,47 @@ Tài liệu này giải thích **luồng OCR chính** của exam stack: **label 
 
 ---
 
+## 0. Công dụng từng mô hình (OCR / label dual)
+
+Luồng một ảnh (B2):
+
+```
+Ảnh MinIO
+  ├─ Gemini (vision)  ──► nhánh A (text_a) ──► GPT refine (gpt_a)
+  │                                              │
+  │                         DeepSeek (optional) ─┤  order / cột
+  │                                              ▼
+  └─ Paddle (local)   ──► nhánh B (text_b) ──► GPT refine (gpt_b)
+                                                 │
+                                                 ▼
+                                               Fuse  ──► ground_truth (cột nộp)
+                                                 │
+                                                 ▼
+                                               GLM judge ──► recommend / silver|HITL
+                                                         (fuse_gt so khớp)
+```
+
+| Mô hình / service | Stage | Việc làm | Key / endpoint |
+|-------------------|-------|----------|----------------|
+| **Gemini** (vision) | Label dual — nhánh **A** | OCR chính từ ảnh (ink + boxes) → `text_a`, cột `gemini` trên B2 | `FEN_LABEL_GEMINI_API_KEY` → `[fen_label_gemini]` |
+| **PaddleOCR** | Label dual — nhánh **B** | OCR local song song Gemini → `text_b` | Service `http://paddle-ocr:8080/ocr` (không cần Ramcloud) |
+| **GPT** | Refine trước fuse | Làm sạch / chỉnh từng nhánh (`gpt_a`, `gpt_b`) trước khi fuse | `FEN_LABEL_GPT_API_KEY` → `[fen_label_gpt]` |
+| **DeepSeek** (optional) | Hỗ trợ layout | Gợi ý thứ tự đọc cột / RTL (`ds_a`, `ds_b`); thiếu key → skip, không chặn pipeline | `FEN_LABEL_DEEPSEEK_API_KEY` |
+| **Fuse** (rule + vote) | Sau 2 nhánh | Ghép A∥B → **`ground_truth`** nộp B2 (`fuse_gt` trong log GLM) | Code trong job (không gọi model riêng) |
+| **GLM** | Judge / QC | So recommend vs fuse → `glm/recommend.jsonl`, gắn `silver` / `needs_hitl` | `FEN_LABEL_GLM_API_KEY` → `[fen_label_glm]` |
+
+**Không nhầm với crawl:**
+
+| Mô hình | Stage | Việc làm | Key |
+|---------|-------|----------|-----|
+| **Gemini** (classify) | Enrich — calligraphy gate | Chỉ phân loại handwritten / printed / spam — **không** OCR chữ cho B2 | `FEN_CALLIGRAPHY_API_KEY` → `[fen_calligraphy]` |
+| Legacy single OCR | `fen_ocr_pipeline` | Một model — **không** dùng cho nộp B2 mới | `FEN_OCR_API_KEY` → `[fen_ocr]` |
+
+**Cột Task B2 (nộp):** `image`, `label`, `ground_truth` (từ fuse), `gemini` (text nhánh A), `post_link`.  
+Chi tiết field debug (`phases.*`, `text_b`, flags): mục dưới và `glm/recommend.jsonl`.
+
+---
+
 ## 1. Pipeline nào tạo file gì?
 
 ```mermaid
@@ -22,8 +63,8 @@ flowchart LR
 
 | DAG | Khi dùng | File JSONL / XLSX chính |
 |-----|----------|-------------------------|
-| **`fen_e2e_pipeline`** | Một lần: crawl → label dual | B1 + B2 (xem bảng dưới) |
-| **`fen_crawl_pipeline`** | Crawl nhiều batch + auto trigger label dual | B1 + B2 |
+| **`fen_e2e_pipeline`** | Một batch crawl → label dual (**không** bắt đáy) | B1 + B2 (xem bảng dưới) |
+| **`fen_crawl_pipeline`** | Crawl nhiều batch + auto trigger label dual (`catch_bottom`) | B1 + B2 |
 | **`fen_label_dual_pipeline`** | Chỉ chạy label dual (đã có ảnh trên MinIO) | B2 |
 | `fen_ocr_pipeline` | Legacy — **không** dùng cho nộp B2 mới | `ocr/ocr_result.jsonl` only |
 

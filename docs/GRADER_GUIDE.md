@@ -11,8 +11,8 @@ Chi tiết artifact label dual: **[LABEL_DUAL_OUTPUT.md](LABEL_DUAL_OUTPUT.md)**
 1. `docker compose ps` — `minio`, `postgres`, `airflow-webserver`, `airflow-scheduler`, `paddle-ocr` running.
 2. MinIO http://localhost:9001 (`admin` / `admin1234`) — buckets `airflow`, `final-exam-nlp-raw`.
 3. Airflow http://localhost:8080 (`admin` / `admin`) — DAGs:
-   - `fen_e2e_pipeline`
-   - `fen_crawl_pipeline`
+   - **`fen_e2e_pipeline`** — một batch crawl+OCR, **không** bắt đáy (khuyến nghị chấm smoke)
+   - `fen_crawl_pipeline` — có `catch_bottom` (mặc định true = rollover)
    - **`fen_label_dual_pipeline`**
    - `fen_ocr_pipeline` (legacy, optional)
 
@@ -69,10 +69,10 @@ Checks crawl + optional label dual paths.
 
 | Setting | Default | Note |
 |---------|---------|------|
-| `batch_target` | 10 posts | Crawl batch |
+| `batch_target` | 10 posts | Crawl batch size (not `batch_size`) |
 | `ocr_limit` | 0 | Full label-dual queue (images) |
 | `flush_posts` | 5 | Upsert every 5 images |
-| `catch_bottom` | true | Rollover until `bottom_year` (2013) |
+| `catch_bottom` | true | **Only** `fen_crawl_pipeline` — rollover to `bottom_year` (2013). `fen_e2e_pipeline` has no catch-bottom |
 
 - No Qdrant — MinIO only.
 - Jobs run in `fen-exam-fen-job` container (DockerOperator).
