@@ -143,9 +143,11 @@ Nếu login OK nhưng upload fail `SignatureDoesNotMatch`: `make config` rồi c
 
 ## 6. Bước tiếp theo
 
-1. Airflow UI → **unpause** DAG (`fen_e2e_pipeline` hoặc `fen_crawl_pipeline`).
-2. Trigger DAG với Configuration JSON (xem README).
+1. Airflow UI → **unpause** **`fen_e2e_pipeline`** (khuyến nghị người mới: **một batch**, không bắt đáy).
+2. Trigger với Configuration JSON — xem [USER_SETUP.md](USER_SETUP.md) / README.
 3. Theo dõi task logs trên Airflow.
+
+Muốn crawl nhiều batch / bắt đáy → dùng `fen_crawl_pipeline` và đọc kỹ `catch_bottom` trong USER_SETUP.
 
 ## Lệnh gọn
 
