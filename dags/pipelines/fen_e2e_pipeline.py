@@ -187,6 +187,9 @@ with DAG(
             ),
             "FEN_LABEL_PREPARE_QUEUES": "true",
             "FEN_LABEL_GLM": "true",
+            # Disable DeepSeek eval (not in hvb core path) /
+            # Tắt DeepSeek eval (không thuộc luồng hvb chính)
+            "FEN_LABEL_EVAL_MODEL": "",
             "FEN_LABEL_FLUSH_POSTS": _param_expr("flush_posts"),
             "FEN_LABEL_WORKERS": "4",
             "FEN_PADDLE_OCR_URL": "http://paddle-ocr:8080/ocr",

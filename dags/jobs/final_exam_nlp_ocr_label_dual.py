@@ -286,7 +286,9 @@ TESTER_HITL_COLUMN_DOCS: tuple[tuple[str, str, str], ...] = (
 )
 VISION_MODEL = "gemini-3.6-flash-high"
 GPT_MODEL = "gpt-5.6-luna"
-EVAL_MODEL = "deepseek-v4-flash"
+# Empty = skip DeepSeek permute (hvb path: Gemini∥Paddle→GPT→fuse→GLM) /
+# Rỗng = bỏ DeepSeek permute (luồng hvb: Gemini∥Paddle→GPT→fuse→GLM)
+EVAL_MODEL = ""
 PADDLE_URL = "http://paddle-ocr:8080/ocr"
 # Match in-cluster Paddle max side so polygons map to pixels /
 # Khớp cạnh dài Paddle trong cluster để polygon khớp pixel
@@ -2873,16 +2875,53 @@ def prepare_quote_queues(
     n_batches: int = QUOTE_BATCH_COUNT,
     force: bool = False,
 ) -> dict[str, Any]:
-    """Write quote_{01..N}.jsonl under the pilot prefix / Ghi queue quote dưới prefix pilot."""
+    """Write quote_{01..N}.jsonl under the pilot prefix / Ghi queue quote dưới prefix pilot.
+
+    Rebuild when force, missing shards, or valid_post image set grew/changed
+    (avoids stale queues skipping new crawl images) /
+    Rebuild khi force, thiếu shard, hoặc tập ảnh valid_post đổi
+    (tránh queue cũ làm OCR skip ảnh crawl mới).
+    """
     root = _assert_pilot_write_root(root)
     keys = [quote_queue_key(root, seq) for seq in range(1, n_batches + 1)]
-    if not force and all(object_exists(bucket, k) for k in keys):
-        sizes = [len(read_jsonl(bucket, k)) for k in keys]
-        print(f"{LOG} quote queues exist n={sum(sizes)} batches={n_batches}", flush=True)
-        return {"prepared": False, "n_quote": sum(sizes), "batch_sizes": sizes, "keys": keys}
+    # Fresh universe from crawl export / Universe mới từ export crawl
     items = collect_quote_items(
         bucket=bucket, source_prefix=source_prefix, group_id=group_id
     )
+    wanted = {
+        str(r.get("image") or "").strip()
+        for r in items
+        if str(r.get("image") or "").strip()
+    }
+    queues_complete = all(object_exists(bucket, k) for k in keys)
+    if not force and queues_complete:
+        existing_rows: list[dict[str, Any]] = []
+        for k in keys:
+            existing_rows.extend(read_jsonl(bucket, k))
+        have = {
+            str(r.get("image") or "").strip()
+            for r in existing_rows
+            if str(r.get("image") or "").strip()
+        }
+        # Same image set → keep shards (skip rewrite) /
+        # Cùng tập ảnh → giữ shard (không ghi lại)
+        if have == wanted:
+            sizes = [len(read_jsonl(bucket, k)) for k in keys]
+            print(
+                f"{LOG} quote queues exist n={sum(sizes)} batches={n_batches} (in sync)",
+                flush=True,
+            )
+            return {
+                "prepared": False,
+                "n_quote": sum(sizes),
+                "batch_sizes": sizes,
+                "keys": keys,
+            }
+        print(
+            f"{LOG} quote queues stale have={len(have)} want={len(wanted)} "
+            f"added={len(wanted - have)} removed={len(have - wanted)} → rebuild",
+            flush=True,
+        )
     chunks = split_quote_rows(items, n_batches)
     for seq, chunk in enumerate(chunks, start=1):
         write_jsonl(bucket, quote_queue_key(root, seq), chunk)

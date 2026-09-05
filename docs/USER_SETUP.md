@@ -173,6 +173,7 @@ Không có `batch_size` — dùng **`batch_target`**.
 - Luôn chỉ **một** batch discover theo `batch_target`, rồi enrich → download → label dual.
 - Không có `catch_bottom` / rollover.
 - OCR dùng hết quote queue nội bộ (`batch_seq=0`); không cần truyền `batch_seq`.
+- `prepare_queues` so sánh tập ảnh với `valid_post`: **có ảnh mới → tự rebuild** `quote_01..12` (không còn skip vì queue stale). Ảnh đã OCR vẫn skip theo page sidecar.
 
 ### `fen_crawl_pipeline` — crawl + (tuỳ chọn) bắt đáy
 

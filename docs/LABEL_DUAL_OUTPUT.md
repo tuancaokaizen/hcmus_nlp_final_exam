@@ -286,7 +286,8 @@ Ví dụ trigger với flush khác:
 |-------|---------|---------|
 | `ocr_limit` / `label_limit` | Tối đa **ảnh pending** mỗi run; `0` = full queue | `0` |
 | `flush_posts` | Upsert jsonl mỗi N **ảnh** | `5` |
-| `prepare_queues` | Tạo queue từ **`export/valid_post.jsonl`** (+ ảnh MinIO). Legacy: `FEN_LABEL_QUOTE_FILTER=true` lọc theo `ocr_result` | `true` (lần đầu sau crawl) |
+| `prepare_queues` | Đồng bộ `quote_01..12` từ **`valid_post`**: thiếu shard / tập ảnh đổi → rebuild; trùng → giữ. Legacy: `FEN_LABEL_QUOTE_FILTER=true` | `true` |
+| `prepare_force` | Ép ghi lại queue dù tập ảnh không đổi | `false` |
 | `glm` | Chạy GLM → `fuse_gt` trong recommend | `true` |
 | `force` | OCR lại ảnh đã xong | `false` |
 | `batch_seq` | **Quote shard** 1–12 (`0` = tất cả). Không phải crawl `batch_seq` | `0` |

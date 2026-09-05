@@ -55,7 +55,12 @@ with DAG(
             default=0,
             type="integer",
             minimum=0,
-            description="Crawl batch; 0 = all quote queues",
+            description="Quote shard 1–12; 0 = all shards (not crawl batch_seq)",
+        ),
+        "prepare_force": Param(
+            default=False,
+            type="boolean",
+            description="Force rewrite quote_01..12 even if image set unchanged",
         ),
         "label_limit": Param(
             default=0,
@@ -92,10 +97,13 @@ with DAG(
         "FEN_LABEL_REPLAY": _bool_expr("replay"),
         "FEN_LABEL_GLM": _bool_expr("glm"),
         "FEN_LABEL_PREPARE_QUEUES": _bool_expr("prepare_queues"),
+        "FEN_LABEL_PREPARE_FORCE": _bool_expr("prepare_force"),
         "FEN_LABEL_WORKERS": _param_expr("workers"),
         "FEN_LABEL_VISION_MODEL": "gemini-3.6-flash-high",
         "FEN_LABEL_GPT_MODEL": "gpt-5.6-luna",
         "FEN_LABEL_GLM_MODEL": "glm-5.3-flash",
+        # Empty disables DeepSeek permute / Chuỗi rỗng = tắt DeepSeek permute
+        "FEN_LABEL_EVAL_MODEL": "",
         "FEN_PADDLE_OCR_URL": "http://paddle-ocr:8080/ocr",
         "FEN_PADDLE_TIMEOUT_SEC": "600",
         "FEN_PADDLE_MAX_INFLIGHT": "2",
