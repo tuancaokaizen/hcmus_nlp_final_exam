@@ -60,11 +60,20 @@ fb-login:
 		-e FEN_GROUP_ID=$${FEN_GROUP_ID:-322453387859386} \
 		fen-job
 
-# Manual FB login via noVNC (http://localhost:7900, password: secret) then save cookies
+# Manual FB login via noVNC then save cookies /
 # Login FB thủ công qua noVNC rồi lưu cookies
+# If .env has FB_USERNAME + FB_PASSWORD → auto-fill; you only complete 2FA in noVNC /
+# Có FB_USERNAME + FB_PASSWORD trong .env → tự điền; bạn chỉ cần 2FA trên noVNC
 fb-login-manual:
 	docker compose -f docker-compose.yml -f docker-compose.minio-dags.yml up -d selenium-chrome
-	@echo "Open http://localhost:7900  (password: secret) and log in to Facebook when prompted"
+	@echo ""
+	@echo "============================================================"
+	@echo "  noVNC (click):  http://localhost:7900"
+	@echo "  VNC password:   secret"
+	@echo "  Tip: set FB_USERNAME + FB_PASSWORD in .env to auto-fill;"
+	@echo "       then only finish 2FA in the browser above."
+	@echo "============================================================"
+	@echo ""
 	docker compose --profile job run --rm \
 		-e FEN_JOB=fen_bootstrap_login \
 		-e FEN_MANUAL_LOGIN=true \

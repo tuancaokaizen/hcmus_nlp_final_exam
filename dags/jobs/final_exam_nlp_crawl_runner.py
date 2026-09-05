@@ -1679,10 +1679,22 @@ def _find_visible(driver, selectors: tuple[str, ...], timeout: float):
     return None
 
 
-def _login_with_credentials(driver, username: str, password: str, totp_secret: str = "") -> None:
+def _login_with_credentials(
+    driver,
+    username: str,
+    password: str,
+    totp_secret: str = "",
+    *,
+    allow_manual_2fa: bool = False,
+) -> None:
     """Fill and submit the Facebook login form, then wait for the session.
 
     Điền và gửi form đăng nhập Facebook, sau đó chờ phiên được thiết lập.
+
+    allow_manual_2fa: if 2FA is required and no TOTP, return so caller can wait
+    for the human in noVNC /
+    allow_manual_2fa: nếu cần 2FA mà không có TOTP, return để caller chờ
+    người dùng trên noVNC.
     """
     from selenium.webdriver.common.keys import Keys
 
@@ -1715,14 +1727,29 @@ def _login_with_credentials(driver, username: str, password: str, totp_secret: s
     if _wait_logged_in(driver, PASSWORD_WAIT_SEC):
         return
 
-    if "two_step_verification" in driver.current_url:
-        if not totp_secret:
-            raise RuntimeError(
-                "Two-factor authentication required but FB_TOTP_SECRET is empty. "
-                "Add the authenticator setup key to secret 'facebook-crawler-login'."
+    cur = (getattr(driver, "current_url", "") or "").lower()
+    needs_2fa = (
+        "two_step_verification" in cur
+        or "checkpoint" in cur
+        or "two_factor" in cur
+        or "approvals" in cur
+    )
+    if needs_2fa or not _is_logged_in(driver):
+        if totp_secret:
+            print("[final_exam_nlp_crawl] two-factor prompt detected, submitting TOTP code")
+            _submit_totp(driver, totp_secret)
+            return
+        if allow_manual_2fa:
+            print(
+                "[final_exam_nlp_crawl] credentials submitted — complete 2FA in noVNC "
+                "(http://localhost:7900 , password: secret)",
+                flush=True,
             )
-        print("[final_exam_nlp_crawl] two-factor prompt detected, submitting TOTP code")
-        _submit_totp(driver, totp_secret)
+            return
+        raise RuntimeError(
+            "Two-factor authentication required but FB_TOTP_SECRET is empty. "
+            "Add the authenticator setup key, or use make fb-login-manual for 2FA in noVNC."
+        )
 
 
 def _close_dialogs(driver, debug: bool = False) -> None:
