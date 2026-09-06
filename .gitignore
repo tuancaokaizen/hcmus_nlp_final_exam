@@ -11,3 +11,8 @@ logs/
 .DS_Store
 docker/airflow/logs/
 output/
+test/
+config.k3s-new
+report/
+scripts/fetch_k3s_minio_stats.sh
+scripts/fetch-k3s*

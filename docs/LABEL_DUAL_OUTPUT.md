@@ -288,6 +288,8 @@ Ví dụ trigger với flush khác:
 | `flush_posts` | Upsert jsonl mỗi N **ảnh** | `5` |
 | `prepare_queues` | Đồng bộ `quote_01..12` từ **`valid_post`**: thiếu shard / tập ảnh đổi → rebuild; trùng → giữ. Legacy: `FEN_LABEL_QUOTE_FILTER=true` | `true` |
 | `prepare_force` | Ép ghi lại queue dù tập ảnh không đổi | `false` |
+| `FEN_LABEL_CLEAN_GT` | Sau fuse: khử emoji/Latin/watermark trên GT+SM trước khi ghi B2 | `true` |
+| `FEN_LABEL_CLEAN_GT_KEEP_HAN_PUNCT` | Giữ dấu câu Hán `，。！？「」…` khi clean | `true` |
 | `glm` | Chạy GLM → `fuse_gt` trong recommend | `true` |
 | `force` | OCR lại ảnh đã xong | `false` |
 | `batch_seq` | **Quote shard** 1–12 (`0` = tất cả). Không phải crawl `batch_seq` | `0` |

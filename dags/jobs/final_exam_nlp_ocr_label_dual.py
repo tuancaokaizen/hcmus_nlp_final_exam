@@ -25,6 +25,7 @@ from typing import Any, Callable
 from common.api_keys import collect_api_keys
 from common.chau_ban_schema import extract_json_object, utc_now_iso
 from common.config import get_value, load_config
+from common.fen_gt_clean import clean_b2_texts, clean_ground_truth
 from common.io_storage import (
     get_minio_client,
     list_objects_with_prefix,
@@ -1381,6 +1382,10 @@ def to_task_b2_row(
     """Task.xlsx B2 row; label = Facebook caption, never GLM.
 
     Dòng Task.xlsx B2; label = caption Facebook, không phải GLM.
+    Optionally strips icons / Latin / device watermarks from GT+SM
+    (FEN_LABEL_CLEAN_GT, default on; keep Han punct by default) /
+    Tuỳ chọn khử icon / Latin / watermark khỏi GT+SM
+    (FEN_LABEL_CLEAN_GT, mặc định bật; giữ dấu câu Hán mặc định).
     """
     boxes = []
     for item in gemini:
@@ -1391,11 +1396,23 @@ def to_task_b2_row(
                 "kind": str(item.get("kind") or "ink_text"),
             }
         )
+    # Post-fuse submit clean / Làm sạch bản nộp sau fuse
+    cleaned = clean_b2_texts(
+        str(ground_truth or ""),
+        str(side_matter or ""),
+        enabled=_bool_env("FEN_LABEL_CLEAN_GT", True),
+        keep_han_punct=_bool_env("FEN_LABEL_CLEAN_GT_KEEP_HAN_PUNCT", True),
+    )
+    if cleaned.get("changed"):
+        print(
+            f"{LOG} gt_clean image={image} log={cleaned.get('gt_clean_log')}",
+            flush=True,
+        )
     return {
         "image": image,
         "label": str(label or ""),
-        "ground_truth": str(ground_truth or ""),
-        "side_matter": str(side_matter or ""),
+        "ground_truth": cleaned["ground_truth"],
+        "side_matter": cleaned["side_matter"],
         "gemini": boxes,
         "post_link": str(post_link or ""),
     }
@@ -3187,6 +3204,12 @@ def build_glm_log_row(
     text_a, text_b = _page_ab_text(page)
     fuse_gt = str((b2 or {}).get("ground_truth") or "")
     rec = accept_ab_recommend(text_a, text_b, recommend)
+    # Same submit clean as B2 GT / Cùng rule làm sạch với GT B2
+    if rec and _bool_env("FEN_LABEL_CLEAN_GT", True):
+        rec, _rec_log = clean_ground_truth(
+            rec,
+            keep_han_punct=_bool_env("FEN_LABEL_CLEAN_GT_KEEP_HAN_PUNCT", True),
+        )
     gate_ok = bool(rec)
     agree = bool(compact_cjk(fuse_gt) and norm_cjk(rec) == norm_cjk(fuse_gt))
     vote = compute_glm_vote(
