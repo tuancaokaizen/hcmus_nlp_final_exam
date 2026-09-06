@@ -1,83 +1,83 @@
 # Local setup log — build → cookies
 
-Ghi lại các bước setup local với Docker Compose. Giá trị mặc định giữ nguyên; **chỉ điền riêng** tài khoản Facebook và API key (không commit `.env`).
+Local setup steps with Docker Compose. Keep default values; **only fill in** Facebook credentials and API keys (do not commit `.env`).
 
-**Người mới:** đọc checklist ngắn ở [USER_SETUP.md](USER_SETUP.md) trước; file này bổ sung chi tiết + lỗi thường gặp.
+**New users:** read the short checklist in [USER_SETUP.md](USER_SETUP.md) first; this file adds detail + common errors.
 
-## 0. Tạo file `.env`
+## 0. Create `.env`
 
-`.env` **không có sẵn trong git** — mỗi máy tự tạo từ template `.env.example`.
+`.env` is **not in git** — each machine creates it from `.env.example`.
 
-### Cách 1 — khuyến nghị (`make configure`)
+### Option 1 — recommended (`make configure`)
 
 ```bash
-# Từ root repo (thư mục có docker-compose.yml, Makefile)
-cp .env.example .env    # chỉ cần nếu chưa có .env; configure cũng tự copy nếu thiếu
+# From repo root (directory with docker-compose.yml, Makefile)
+cp .env.example .env    # only if .env is missing; configure also copies if needed
 make configure
 ```
 
-Wizard hỏi lần lượt:
+Wizard prompts in order:
 
-| Prompt | Ghi vào |
-|--------|---------|
-| Facebook email/phone | `FB_USERNAME` (Enter = bỏ qua) |
-| Facebook password | `FB_PASSWORD` (Enter = bỏ qua; dùng `make fb-login-manual` sau) |
-| Ramcloud base URL | `RAMCLOUDS_BASE_URL` (mặc định `https://ramclouds.me/v1`) |
-| `FEN_CALLIGRAPHY_API_KEY` | key crawl gate |
-| `FEN_OCR_API_KEY` | key OCR |
+| Prompt | Written to |
+|--------|------------|
+| Facebook email/phone | `FB_USERNAME` (Enter = skip) |
+| Facebook password | `FB_PASSWORD` (Enter = skip; use `make fb-login-manual` later) |
+| Ramcloud base URL | `RAMCLOUDS_BASE_URL` (default `https://ramclouds.me/v1`) |
+| `FEN_CALLIGRAPHY_API_KEY` | crawl gate key |
+| `FEN_OCR_API_KEY` | OCR key |
 
-Sau wizard, script còn:
+After the wizard, the script also:
 
-- Set `FEN_HOST_PROJECT_DIR` = absolute path repo (tự **quote** nếu path có khoảng trắng)
-- Chạy `make config` → sinh `dags/config.ini`
+- Sets `FEN_HOST_PROJECT_DIR` = absolute repo path (auto-**quotes** if the path has spaces)
+- Runs `make config` → generates `dags/config.ini`
 
-Các key còn lại (`FEN_LABEL_*_API_KEY`, …) nếu wizard không hỏi: mở `.env` điền tay (có thể copy cùng giá trị Ramcloud nếu dùng chung key).
+Remaining keys (`FEN_LABEL_*_API_KEY`, …) if the wizard did not ask: open `.env` and fill by hand (same Ramcloud value is fine if you share one key).
 
-### Cách 2 — copy rồi sửa tay
+### Option 2 — copy then edit by hand
 
 ```bash
 cp .env.example .env
-# Mở .env, điền FB + API keys
-# Set path repo (bắt buộc quote nếu có space):
+# Open .env, fill FB + API keys
+# Set repo path (quotes required if spaces):
 #   FEN_HOST_PROJECT_DIR="/absolute/path/to/repo"
-make config             # sinh dags/config.ini từ .env
+make config             # generate dags/config.ini from .env
 ```
 
-### Checklist sau khi có `.env`
+### Checklist after `.env` exists
 
-| Biến | Mặc định local (trong `.env.example`) | Việc của bạn |
-|------|----------------------------------------|--------------|
-| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | `admin` / `admin1234` | Giữ nguyên |
-| `AIRFLOW_USERNAME` / `AIRFLOW_PASSWORD` | `admin` / `admin` | Giữ nguyên |
-| `FEN_GROUP_ID` | `322453387859386` | Đổi nếu crawl group khác |
-| `FEN_HOST_PROJECT_DIR` | trống → `make configure` tự điền | Kiểm tra có quote nếu path có space |
-| `FB_USERNAME` / `FB_PASSWORD` | trống | Điền, hoặc để trống + `make fb-login-manual` |
-| `FEN_*_API_KEY` | trống | Điền key Ramcloud của bạn |
+| Variable | Local default (in `.env.example`) | Your action |
+|----------|-----------------------------------|-------------|
+| `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` | `admin` / `admin1234` | Keep |
+| `AIRFLOW_USERNAME` / `AIRFLOW_PASSWORD` | `admin` / `admin` | Keep |
+| `FEN_GROUP_ID` | `322453387859386` | Change if crawling another group |
+| `FEN_HOST_PROJECT_DIR` | empty → `make configure` fills it | Check quotes if path has spaces |
+| `FB_USERNAME` / `FB_PASSWORD` | empty | Fill, or leave empty + `make fb-login-manual` |
+| `FEN_*_API_KEY` | empty | Fill your Ramcloud keys |
 
-**Không commit** `.env` (đã có trong `.gitignore`). Chỉ share `.env.example`.
+**Do not commit** `.env` (listed in `.gitignore`). Share only `.env.example`.
 
-## 1. Sửa script / image (đã có trong repo nếu đã merge)
+## 1. Script / image fixes (already in repo if merged)
 
-| Vấn đề | Cách xử lý |
-|--------|------------|
-| `scripts/up.sh` lỗi `mapfile` (bash cũ không có `mapfile`) | Ghép `-f` compose trực tiếp với path quoted |
-| Path có space làm vỡ `-f` compose | Dùng `"$ROOT/docker-compose.yml"` |
-| Docker Hub timeout / mirror `gcr.io` | Restart Docker Desktop; tắt proxy/registry mirror nếu cần |
-| `minio/mc:RELEASE.2024-12-18...` **not found** | Dùng `minio/mc:latest` |
-| Tag Selenium cố định thiếu image trên một số host | Dùng `selenium/standalone-chrome:latest` |
-| Paddle thiếu `block_merge.py` / `text_layout.py` | Dockerfile copy đủ 3 file + rebuild |
-| Paddle crash `paddlepaddle is not installed` | Dockerfile cài `paddlepaddle==3.2.2` rồi `requirements.txt` |
+| Issue | Fix |
+|-------|-----|
+| `scripts/up.sh` fails on `mapfile` (old bash) | Pass `-f` compose paths quoted directly |
+| Paths with spaces break compose `-f` | Use `"$ROOT/docker-compose.yml"` |
+| Docker Hub timeout / `gcr.io` mirror | Restart Docker Desktop; disable proxy/registry mirror if needed |
+| `minio/mc:RELEASE.2024-12-18...` **not found** | Use `minio/mc:latest` |
+| Pinned Selenium tag missing on some hosts | Use `selenium/standalone-chrome:latest` |
+| Paddle missing `block_merge.py` / `text_layout.py` | Dockerfile copies all 3 files + rebuild |
+| Paddle crash `paddlepaddle is not installed` | Dockerfile installs `paddlepaddle==3.2.2` then `requirements.txt` |
 
 ## 2. `make up`
 
 ```bash
-# Từ root repo
+# From repo root
 make up
 ```
 
 Stack: MinIO, Postgres, Airflow (web + scheduler), dag-sync, Selenium, Paddle OCR.
 
-| Service | URL | Login (mặc định local) |
+| Service | URL | Login (local default) |
 |---------|-----|------------------------|
 | Airflow | http://localhost:8080 | `admin` / `admin` |
 | MinIO console | http://localhost:9001 | `admin` / `admin1234` |
@@ -85,77 +85,77 @@ Stack: MinIO, Postgres, Airflow (web + scheduler), dag-sync, Selenium, Paddle OC
 | Selenium | http://localhost:4444 | — |
 | noVNC (manual FB) | http://localhost:7900 | password `secret` |
 
-Sau `make up`: buckets MinIO + DAG trên `airflow/dags/fen-exam/`.
+After `make up`: MinIO buckets + DAGs under `airflow/dags/fen-exam/`.
 
-## 3. Đồng bộ `config.ini`
+## 3. Sync `config.ini`
 
-Mỗi lần đổi MinIO / API keys trong `.env`:
+Whenever you change MinIO / API keys in `.env`:
 
 ```bash
 make config
-# tương đương: bash scripts/generate_config.sh
+# equivalent: bash scripts/generate_config.sh
 ```
 
-`dags/config.ini` → `[minio] secret_key` phải khớp `MINIO_ROOT_PASSWORD` (lệch → `SignatureDoesNotMatch`).
+`dags/config.ini` → `[minio] secret_key` must match `MINIO_ROOT_PASSWORD` (mismatch → `SignatureDoesNotMatch`).
 
-> `config.ini` có thể chứa API key sau generate — **không commit**.
+> `config.ini` may contain API keys after generate — **do not commit**.
 
-## 4. Facebook login (thủ công + lưu cookies)
+## 4. Facebook login (manual + save cookies)
 
-Không bắt buộc `FB_TOTP_SECRET` nếu login tay. Flow:
+`FB_TOTP_SECRET` is not required for manual login. Flow:
 
-1. Compose expose noVNC `7900`, `SE_VNC_PASSWORD=secret`.
-2. Job `FEN_MANUAL_LOGIN=true` mở FB login, chờ người đăng nhập (kể cả 2FA), rồi lưu cookies.
+1. Compose exposes noVNC `7900`, `SE_VNC_PASSWORD=secret`.
+2. Job with `FEN_MANUAL_LOGIN=true` opens FB login, waits for the user (including 2FA), then saves cookies.
 
 ```bash
-# Quyền profile Chrome (seluser uid 1200)
+# Chrome profile permissions (seluser uid 1200)
 docker exec -u root fen-exam-selenium-chrome-1 \
   sh -c 'chown -R 1200:1201 /data/chrome-profile'
 
 make fb-login-manual
 ```
 
-**Thao tác người dùng**
+**User steps**
 
-1. Mở http://localhost:7900 — password `secret`.
-2. Đăng nhập Facebook bằng **acc của bạn** trong Chrome trên noVNC (2FA thủ công nếu có).
-3. Job detect `logged_in=True` → kiểm tra group → upload cookies.
+1. Open http://localhost:7900 — password `secret`.
+2. Log in to Facebook with **your account** in Chrome on noVNC (manual 2FA if needed).
+3. Job detects `logged_in=True` → checks group → uploads cookies.
 
-**Log thành công (ví dụ)**
+**Success log (example)**
 
 ```
 saved N cookies to MinIO key=facebook/<FEN_GROUP_ID>/state/cookies.json slot=a
 ```
 
-Mặc định group: `FEN_GROUP_ID=322453387859386` (có thể đổi trong `.env`).
+Default group: `FEN_GROUP_ID=322453387859386` (changeable in `.env`).
 
-Nếu login OK nhưng upload fail `SignatureDoesNotMatch`: `make config` rồi chạy lại `make fb-login-manual` (profile đã login → chỉ lưu cookies).
+If login OK but upload fails with `SignatureDoesNotMatch`: `make config` then re-run `make fb-login-manual` (profile already logged in → only save cookies).
 
-## 5. File liên quan (trong repo)
+## 5. Related files (in repo)
 
 - `.env` / `.env.example` — quote `FEN_HOST_PROJECT_DIR`; MinIO `admin` / `admin1234`
-- `scripts/up.sh` — tương thích bash cũ + path có space
+- `scripts/up.sh` — old-bash + paths with spaces
 - `docker-compose.yml` — `minio/mc:latest`, selenium `latest`, port `7900`, VNC env
 - `docker-compose.minio-dags.yml` — `minio/mc:latest`
-- `docker/paddle-ocr/Dockerfile` — copy `app.py`, `block_merge.py`, `text_layout.py`
-- `dags/jobs/run_job.py` — `FEN_MANUAL_LOGIN` / chờ noVNC
-- `Makefile` — target `fb-login-manual`
+- `docker/paddle-ocr/Dockerfile` — copies `app.py`, `block_merge.py`, `text_layout.py`
+- `dags/jobs/run_job.py` — `FEN_MANUAL_LOGIN` / noVNC wait
+- `Makefile` — `fb-login-manual` target
 
-## 6. Bước tiếp theo
+## 6. Next steps
 
-1. Airflow UI → **unpause** **`fen_e2e_pipeline`** (khuyến nghị người mới: **một batch**, không bắt đáy).
-2. Trigger với Configuration JSON — xem [USER_SETUP.md](USER_SETUP.md) / README.
-3. Theo dõi task logs trên Airflow.
+1. Airflow UI → **unpause** **`fen_e2e_pipeline`** (recommended for new users: **one batch**, no catch-bottom).
+2. Trigger with Configuration JSON — see [USER_SETUP.md](USER_SETUP.md) / README.
+3. Watch task logs in Airflow.
 
-Muốn crawl nhiều batch / bắt đáy → dùng `fen_crawl_pipeline` và đọc kỹ `catch_bottom` trong USER_SETUP.
+For multi-batch / catch-bottom crawls → use `fen_crawl_pipeline` and read `catch_bottom` carefully in USER_SETUP.
 
-## Lệnh gọn
+## Short commands
 
 ```bash
 cp .env.example .env
 make configure           # wizard FB + API key + FEN_HOST_PROJECT_DIR + config.ini
-# (hoặc sửa .env tay rồi: make config)
+# (or edit .env by hand then: make config)
 make up
-make fb-login-manual     # login FB tay trên :7900 → cookies MinIO
+make fb-login-manual     # manual FB login on :7900 → cookies to MinIO
 # → Airflow :8080 unpause + trigger DAG
 ```

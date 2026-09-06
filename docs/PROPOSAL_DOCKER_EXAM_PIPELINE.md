@@ -1,44 +1,44 @@
-# Đề xuất: NLP Final Exam Pipeline — Docker Compose
+# Proposal: NLP Final Exam Pipeline — Docker Compose
 
-> **Vận hành hiện tại:** [`README.md`](../README.md), [`USER_SETUP.md`](USER_SETUP.md), [`LABEL_DUAL_OUTPUT.md`](LABEL_DUAL_OUTPUT.md), [`PIPELINE_BUILD_DEPLOY_RUN.md`](PIPELINE_BUILD_DEPLOY_RUN.md) — luồng chính **label dual** (`task_b2.jsonl`, `flush_posts=5`). File này là proposal thiết kế ban đầu.
+> **Current operations:** [`README.md`](../README.md), [`USER_SETUP.md`](USER_SETUP.md), [`LABEL_DUAL_OUTPUT.md`](LABEL_DUAL_OUTPUT.md), [`PIPELINE_BUILD_DEPLOY_RUN.md`](PIPELINE_BUILD_DEPLOY_RUN.md) — primary flow is **label dual** (`task_b2.jsonl`, `flush_posts=5`). This file is the original design proposal.
 
-> **Mục đích:** Đề xuất kiến trúc repo `implement_nlp_pipeline_for_exam` cho **người chấm đồ án**.  
-> Deploy **một mode duy nhất: Docker Compose** (Airflow + MinIO + Paddle + Selenium).
+> **Purpose:** Propose the architecture of repo `implement_nlp_pipeline_for_exam` for **thesis graders**.  
+> Deploy in **one mode only: Docker Compose** (Airflow + MinIO + Paddle + Selenium).
 
-**Phiên bản:** `v0.2-proposal`  
-**Ngày:** 2026-08-31  
+**Version:** `v0.2-proposal`  
+**Date:** 2026-08-31  
 **Repo:** `features/implement_nlp_pipeline_for_exam`
 
 ---
 
-## 1. Tóm tắt
+## 1. Summary
 
-### 1.1 Vấn đề
+### 1.1 Problem
 
-Cần repo exam **tự chứa**, người chấm chỉ cần Docker Desktop — `docker compose up` / `make up` là chạy được.
+The exam repo must be **self-contained**; graders only need Docker Desktop — `docker compose up` / `make up` should be enough to run it.
 
-### 1.2 Giải pháp — **1 mode Docker Compose**
+### 1.2 Solution — **one Docker Compose mode**
 
-| Thành phần | Docker service |
-|------------|----------------|
+| Component | Docker service |
+|-----------|----------------|
 | Orchestration | `airflow-webserver` + `airflow-scheduler` |
 | Object storage | `minio` |
-| OCR nhánh B | `paddle-ocr` (FastAPI, build từ Dockerfile) |
-| Crawl GraphQL | `selenium-chrome` |
+| OCR branch B | `paddle-ocr` (FastAPI, built from Dockerfile) |
+| GraphQL crawl | `selenium-chrome` |
 | Job runner | `fen-job` container (entrypoint `run_job.py`) |
-| LLM | API ngoài (Gemini / GPT / DeepSeek / GLM) — keys trong `.env` |
+| LLM | External APIs (Gemini / GPT / DeepSeek / GLM) — keys in `.env` |
 
-| Lớp | Cách làm trong exam |
-|-----|---------------------|
-| Chạy job | `DockerOperator` → image `fen-exam-fen-job` |
+| Layer | Approach in the exam repo |
+|-------|---------------------------|
+| Run jobs | `DockerOperator` → image `fen-exam-fen-job` |
 | MinIO | `http://minio:9000` (compose network) |
 | Paddle | `http://paddle-ocr:8080` |
-| Dependencies Python job | Build sẵn trong image `fen-job` |
-| Deploy DAG | `make deploy` lên bucket `airflow` + sidecar sync (hoặc `make up-dev` bind mount `./dags`) |
+| Python job dependencies | Pre-built into the `fen-job` image |
+| Deploy DAGs | `make deploy` to bucket `airflow` + sidecar sync (or `make up-dev` bind-mount `./dags`) |
 
 ---
 
-## 2. Pipeline nghiệp vụ (giữ nguyên logic)
+## 2. Business pipeline (logic unchanged)
 
 ### 2.1 Flow
 
@@ -65,36 +65,36 @@ flowchart TB
   GLM --> RU
 ```
 
-### 2.2 GraphQL trong crawl — **Có**
+### 2.2 GraphQL in crawl — **Yes**
 
 ```
-Selenium (cookies FB) → scroll feed → bắt GraphQL (CDP)
+Selenium (cookies FB) → scroll feed → capture GraphQL (CDP)
   → replay GroupsCometFeedRegularStoriesPaginationQuery
-  → parse caption/images → enrich permalink nếu thiếu → download CDN → MinIO
+  → parse caption/images → enrich permalink if missing → download CDN → MinIO
 ```
 
 Code: `final_exam_nlp_v5_discover.py`, `final_exam_nlp_graphql_batch.py`, `final_exam_nlp_v5_enrich.py`
 
-**Cho người chấm:** ship `sample_data/` để skip crawl khi không có cookies FB.
+**For graders:** ship `sample_data/` so crawl can be skipped when FB cookies are unavailable.
 
 ### 2.3 DAG ↔ Job ↔ MinIO
 
-| Stage | DAG | `FEN_JOB` | Output MinIO |
+| Stage | DAG | `FEN_JOB` | MinIO output |
 |-------|-----|-----------|--------------|
 | Crawl | `final_exam_nlp_crawl_pipeline` | `v5_discover/enrich/download` | `valid_post.jsonl`, `images/` |
 | OCR | `final_exam_nlp_ocr_pipeline` | `final_exam_nlp_ocr` | `ocr_result.jsonl` |
 | Label dual | `final_exam_nlp_ocr_label_dual_pipeline` | `final_exam_nlp_ocr_label_dual` | `task_b2.jsonl` |
 | GLM | `final_exam_nlp_gt_confidence_judge_pipeline` | `gt_confidence_judge` | `glm/recommend.jsonl` |
 | Rollup | `final_exam_nlp_consensus_rollup_pipeline` | `consensus_rollup` | `consensus_rollup.jsonl` |
-| Curated | script/DAG mới | `hitl_curated_export` | `selected_hitl_pass_b2.*` |
+| Curated | new script/DAG | `hitl_curated_export` | `selected_hitl_pass_b2.*` |
 
 Bucket: `final-exam-nlp-raw` · Prefix: `facebook/{group_id}/`
 
 ---
 
-## 3. Kiến trúc Docker Compose
+## 3. Docker Compose architecture
 
-### 3.1 Sơ đồ
+### 3.1 Diagram
 
 ```mermaid
 graph TB
@@ -118,29 +118,29 @@ graph TB
 
 ### 3.2 `docker-compose.yml` (services)
 
-| Service | Image | Port | Ghi chú |
-|---------|-------|------|---------|
-| `minio` | `minio/minio` | 9000, 9001 | Bucket `final-exam-nlp-raw` + `airflow` |
+| Service | Image | Port | Notes |
+|---------|-------|------|-------|
+| `minio` | `minio/minio` | 9000, 9001 | Buckets `final-exam-nlp-raw` + `airflow` |
 | `postgres` | `postgres:15` | — | Airflow metadata DB |
 | `airflow-init` | `fen-airflow` | — | migrate + create admin |
 | `airflow-webserver` | `fen-airflow` | 8080 | UI |
 | `airflow-scheduler` | `fen-airflow` | — | |
-| `airflow-worker` | `fen-airflow` | — | CeleryExecutor hoặc LocalExecutor |
-| `paddle-ocr` | `fen-paddle-ocr` | 8080 | CPU default; GPU qua `deploy.resources` |
+| `airflow-worker` | `fen-airflow` | — | CeleryExecutor or LocalExecutor |
+| `paddle-ocr` | `fen-paddle-ocr` | 8080 | CPU by default; GPU via `deploy.resources` |
 | `selenium-chrome` | `selenium/standalone-chrome` | 4444 | GraphQL crawl |
-| `fen-job` | `fen-job` | — | `profiles: [job]` — không auto-start |
+| `fen-job` | `fen-job` | — | `profiles: [job]` — do not auto-start |
 
 Volumes: `minio-data`, `fen-python-deps`, `selenium-profile` (cookies)
 
-### 3.3 Chạy job qua `DockerOperator`
+### 3.3 Running jobs via `DockerOperator`
 
-Module `dags/jobs/common/docker_executor.py` spawn container `fen-job` trên cùng Docker network (mount `/var/run/docker.sock` vào Airflow).
+Module `dags/jobs/common/docker_executor.py` spawns a `fen-job` container on the same Docker network (mount `/var/run/docker.sock` into Airflow).
 
 ```python
-# Airflow task gọi image fen-exam-fen-job với FEN_JOB=<job_name>
+# Airflow task runs fen-exam-fen-job image with FEN_JOB=<job_name>
 ```
 
-Env trong job container:
+Env inside the job container:
 ```
 FEN_RUNTIME=docker
 FEN_MINIO_ENDPOINT=http://minio:9000
@@ -148,9 +148,9 @@ PADDLE_SERVICE_URL=http://paddle-ocr:8080
 SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
 ```
 
-### 3.4 Docker images cần build
+### 3.4 Docker images to build
 
-| Image | Dockerfile | Nội dung |
+| Image | Dockerfile | Contents |
 |-------|------------|----------|
 | `fen-paddle-ocr` | `docker/paddle-ocr/Dockerfile` | FastAPI + PaddleOCR |
 | `fen-airflow` | `docker/airflow/Dockerfile` | `apache/airflow:2.10.5` + `requirements.txt` + DAGs |
@@ -158,14 +158,14 @@ SELENIUM_REMOTE_URL=http://selenium-chrome:4444/wd/hub
 
 ---
 
-## 4. Cấu trúc repo
+## 4. Repo structure
 
 ```
 implement_nlp_pipeline_for_exam/
 ├── README.md
 ├── .env.example
 ├── docker-compose.yml
-├── docker-compose.minimal.yml    # MinIO + Airflow + Paddle (không Selenium)
+├── docker-compose.minimal.yml    # MinIO + Airflow + Paddle (no Selenium)
 ├── Makefile                      # make up | down | down-v | deploy | verify | …
 │
 ├── docker/
@@ -196,11 +196,11 @@ implement_nlp_pipeline_for_exam/
 └── tests/
 ```
 
-Repo exam chỉ dùng Docker Compose (không kèm manifest cluster).
+The exam repo uses Docker Compose only (no cluster manifests).
 
 ---
 
-## 5. Cấu hình `.env.example`
+## 5. `.env.example` configuration
 
 ```bash
 MINIO_ROOT_USER=admin
@@ -218,13 +218,13 @@ FEN_RUNTIME=docker
 AIRFLOW_UID=50000
 ```
 
-`scripts/bootstrap.sh` generate `dags/config.ini` từ `.env`.
+`scripts/bootstrap.sh` generates `dags/config.ini` from `.env`.
 
 ---
 
-## 6. Luồng chấm đồ án
+## 6. Grading workflow
 
-### Quick demo (~15 phút, không cần API key / FB)
+### Quick demo (~15 minutes, no API key / FB required)
 
 ```bash
 git clone ... && cd implement_nlp_pipeline_for_exam
@@ -235,7 +235,7 @@ make trigger-demo
 make verify
 ```
 
-### Full pipeline (có API keys + cookies FB)
+### Full pipeline (with API keys + FB cookies)
 
 ```bash
 git clone https://github.com/tuancaokaizen/hcmus_nlp_final_exam.git
@@ -250,54 +250,54 @@ make verify
 
 ---
 
-## 7. Yêu cầu máy chấm
+## 7. Grader machine requirements
 
-| Resource | Tối thiểu | Khuyến nghị |
-|----------|-----------|-------------|
+| Resource | Minimum | Recommended |
+|----------|---------|-------------|
 | CPU | 4 cores | 8 cores |
 | RAM | 16 GB | 32 GB |
 | Disk | 50 GB | 100 GB |
 | Docker | 24.0+ | + Compose v2 |
-| GPU | Không bắt buộc | 1× NVIDIA (Paddle nhanh hơn) |
+| GPU | Not required | 1× NVIDIA (faster Paddle) |
 
 ---
 
-## 8. Kế hoạch triển khai
+## 8. Implementation plan
 
-| Phase | Việc | Thời gian |
-|-------|------|-----------|
-| 0 | `docker-compose.yml`, Dockerfiles, `Makefile`, `bootstrap.sh` | 1–2 ngày |
-| 1 | Sync `dags/jobs` + docker executor adapter | 2–3 ngày |
-| 2 | `sample_data/` + `load_sample_data.sh` + `verify` | 1–2 ngày |
-| 3 | `GRADER_GUIDE.md`, README, test e2e trên VM sạch | 1 ngày |
+| Phase | Work | Time |
+|-------|------|------|
+| 0 | `docker-compose.yml`, Dockerfiles, `Makefile`, `bootstrap.sh` | 1–2 days |
+| 1 | Sync `dags/jobs` + docker executor adapter | 2–3 days |
+| 2 | `sample_data/` + `load_sample_data.sh` + `verify` | 1–2 days |
+| 3 | `GRADER_GUIDE.md`, README, e2e test on a clean VM | 1 day |
 
 ---
 
-## 9. Tiêu chí Done
+## 9. Done criteria
 
 1. `docker compose up -d` → Airflow :8080, MinIO :9001, Paddle `/health` OK  
-2. `make load-sample && make trigger-demo` → `task_b2.jsonl` trên MinIO  
-3. B2 đủ cột: `image, caption, ground_truth, side_matter, gemini, post_link`  
-4. `make verify` pass  
-5. `GRADER_GUIDE.md` ≤ 10 bước, chỉ cần Docker Desktop  
+2. `make load-sample && make trigger-demo` → `task_b2.jsonl` on MinIO  
+3. B2 has columns: `image, caption, ground_truth, side_matter, gemini, post_link`  
+4. `make verify` passes  
+5. `GRADER_GUIDE.md` ≤ 10 steps, Docker Desktop only  
 
 ---
 
 ## 10. ADR
 
-| Quyết định | Lý do |
-|------------|-------|
-| **Chỉ Docker Compose** | Người chấm chỉ cần Docker Desktop |
-| Giữ GraphQL crawl | Đúng logic nghiệp vụ; `sample_data` để skip khi không crawl live |
-| `DockerOperator` + `run_job.py` | Một entrypoint job, không fork business logic |
-| LLM qua API | Không bundle weights |
+| Decision | Rationale |
+|----------|-----------|
+| **Docker Compose only** | Graders only need Docker Desktop |
+| Keep GraphQL crawl | Matches business logic; `sample_data` to skip when not crawling live |
+| `DockerOperator` + `run_job.py` | Single job entrypoint; no forked business logic |
+| LLM via API | Do not bundle model weights |
 
 ---
 
-## Phụ lục — Module chính trong repo
+## Appendix — Main modules in the repo
 
-| Thành phần | Path |
-|------------|------|
+| Component | Path |
+|-----------|------|
 | Crawl + GraphQL | `dags/jobs/fen_crawl_*.py`, `final_exam_nlp_graphql_batch.py` |
 | OCR / Label dual / GLM | `dags/jobs/final_exam_nlp_ocr*.py` |
 | Paddle service | `docker/paddle-ocr/` |
