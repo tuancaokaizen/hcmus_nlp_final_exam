@@ -1,8 +1,8 @@
 # Grader guide
 
-Checklist chấm bài pipeline exam (Docker Compose).
+Checklist for grading the exam pipeline (Docker Compose).
 
-Chi tiết artifact label dual: **[LABEL_DUAL_OUTPUT.md](LABEL_DUAL_OUTPUT.md)**.
+Label dual artifact details: **[LABEL_DUAL_OUTPUT.md](LABEL_DUAL_OUTPUT.md)**.
 
 ---
 
@@ -11,8 +11,8 @@ Chi tiết artifact label dual: **[LABEL_DUAL_OUTPUT.md](LABEL_DUAL_OUTPUT.md)**
 1. `docker compose ps` — `minio`, `postgres`, `airflow-webserver`, `airflow-scheduler`, `paddle-ocr` running.
 2. MinIO http://localhost:9001 (`admin` / `admin1234`) — buckets `airflow`, `final-exam-nlp-raw`.
 3. Airflow http://localhost:8080 (`admin` / `admin`) — DAGs:
-   - **`fen_e2e_pipeline`** — một batch crawl+OCR, **không** bắt đáy (khuyến nghị chấm smoke)
-   - `fen_crawl_pipeline` — có `catch_bottom` (mặc định true = rollover)
+   - **`fen_e2e_pipeline`** — one-batch crawl+OCR, **no** catch-bottom (recommended for smoke grading)
+   - `fen_crawl_pipeline` — has `catch_bottom` (default true = rollover)
    - **`fen_label_dual_pipeline`**
    - `fen_ocr_pipeline` (legacy, optional)
 
@@ -21,14 +21,14 @@ Chi tiết artifact label dual: **[LABEL_DUAL_OUTPUT.md](LABEL_DUAL_OUTPUT.md)**
 ## 2. Config
 
 - `dags/config.ini` exists after `make configure`.
-- Keys **tách stage** (không dùng chung một key):
+- Keys are **stage-separated** (do not share one key):
   - `[fen_calligraphy]` — enrich
   - `[fen_label_gemini]`, `[fen_label_gpt]`, `[fen_label_glm]` — label dual
-  - `[fen_ocr]` — chỉ legacy OCR
+  - `[fen_ocr]` — legacy OCR only
 
 ---
 
-## 3. Artifacts sau E2E
+## 3. Artifacts after E2E
 
 Prefix: `final-exam-nlp-raw/facebook/{group_id}/`
 
@@ -40,18 +40,18 @@ Prefix: `final-exam-nlp-raw/facebook/{group_id}/`
 | `crawl/discover/seen_post_ids.json` | Yes |
 | `export/valid_post.jsonl` | Yes |
 
-### Label dual (B2) — luồng chính
+### Label dual (B2) — main path
 
 | Path | Required |
 |------|----------|
-| `ocr/label_dual_pilot/task_b2.jsonl` | Yes (nếu OCR đã chạy) |
-| `ocr/label_dual_pilot/task_b2.xlsx` | Yes (cuối run) |
+| `ocr/label_dual_pilot/task_b2.jsonl` | Yes (if OCR ran) |
+| `ocr/label_dual_pilot/task_b2.xlsx` | Yes (end of run) |
 | `ocr/label_dual_pilot/summary.json` | Yes |
-| `ocr/label_dual_pilot/glm/recommend.jsonl` | Yes nếu `glm=true` — có field **`fuse_gt`** |
+| `ocr/label_dual_pilot/glm/recommend.jsonl` | Yes if `glm=true` — must include **`fuse_gt`** |
 
-Legacy only (không thay B2):
+Legacy only (does not replace B2):
 
-- `ocr/ocr_result.jsonl` — từ `fen_ocr_pipeline`
+- `ocr/ocr_result.jsonl` — from `fen_ocr_pipeline`
 
 ---
 

@@ -1,51 +1,51 @@
 # Label dual — file output, upsert & flush
 
-Tài liệu này giải thích **luồng OCR chính** của exam stack: **label dual** (Gemini ∥ Paddle → fuse → GLM). Đọc kèm [USER_SETUP.md](USER_SETUP.md) khi trigger DAG.
+This document explains the exam stack’s **primary OCR flow**: **label dual** (Gemini ∥ Paddle → fuse → GLM). Read alongside [USER_SETUP.md](USER_SETUP.md) when triggering DAGs.
 
 ---
 
-## 0. Công dụng từng mô hình (OCR / label dual)
+## 0. Role of each model (OCR / label dual)
 
-Luồng một ảnh (B2):
+Flow for one image (B2):
 
 ```
-Ảnh MinIO
-  ├─ Gemini (vision)  ──► nhánh A (text_a) ──► GPT refine (gpt_a)
+MinIO image
+  ├─ Gemini (vision)  ──► branch A (text_a) ──► GPT refine (gpt_a)
   │                                              │
-  │                         DeepSeek (optional) ─┤  order / cột
+  │                         DeepSeek (optional) ─┤  order / columns
   │                                              ▼
-  └─ Paddle (local)   ──► nhánh B (text_b) ──► GPT refine (gpt_b)
+  └─ Paddle (local)   ──► branch B (text_b) ──► GPT refine (gpt_b)
                                                  │
                                                  ▼
-                                               Fuse  ──► ground_truth (cột nộp)
+                                               Fuse  ──► ground_truth (submit column)
                                                  │
                                                  ▼
                                                GLM judge ──► recommend / silver|HITL
-                                                         (fuse_gt so khớp)
+                                                         (fuse_gt match check)
 ```
 
-| Mô hình / service | Stage | Việc làm | Key / endpoint |
-|-------------------|-------|----------|----------------|
-| **Gemini** (vision) | Label dual — nhánh **A** | OCR chính từ ảnh (ink + boxes) → `text_a`, cột `gemini` trên B2 | `FEN_LABEL_GEMINI_API_KEY` → `[fen_label_gemini]` |
-| **PaddleOCR** | Label dual — nhánh **B** | OCR local song song Gemini → `text_b` | Service `http://paddle-ocr:8080/ocr` (không cần Ramcloud) |
-| **GPT** | Refine trước fuse | Làm sạch / chỉnh từng nhánh (`gpt_a`, `gpt_b`) trước khi fuse | `FEN_LABEL_GPT_API_KEY` → `[fen_label_gpt]` |
-| **DeepSeek** (optional) | Hỗ trợ layout | Gợi ý thứ tự đọc cột / RTL (`ds_a`, `ds_b`); thiếu key → skip, không chặn pipeline | `FEN_LABEL_DEEPSEEK_API_KEY` |
-| **Fuse** (rule + vote) | Sau 2 nhánh | Ghép A∥B → **`ground_truth`** nộp B2 (`fuse_gt` trong log GLM) | Code trong job (không gọi model riêng) |
-| **GLM** | Judge / QC | So recommend vs fuse → `glm/recommend.jsonl`, gắn `silver` / `needs_hitl` | `FEN_LABEL_GLM_API_KEY` → `[fen_label_glm]` |
+| Model / service | Stage | What it does | Key / endpoint |
+|-----------------|-------|--------------|----------------|
+| **Gemini** (vision) | Label dual — branch **A** | Primary OCR from the image (ink + boxes) → `text_a`, column `gemini` on B2 | `FEN_LABEL_GEMINI_API_KEY` → `[fen_label_gemini]` |
+| **PaddleOCR** | Label dual — branch **B** | Local OCR in parallel with Gemini → `text_b` | Service `http://paddle-ocr:8080/ocr` (no Ramcloud key) |
+| **GPT** | Refine before fuse | Clean / refine each branch (`gpt_a`, `gpt_b`) before fuse | `FEN_LABEL_GPT_API_KEY` → `[fen_label_gpt]` |
+| **DeepSeek** (optional) | Layout assist | Suggest column / RTL reading order (`ds_a`, `ds_b`); missing key → skip, does not block the pipeline | `FEN_LABEL_DEEPSEEK_API_KEY` |
+| **Fuse** (rule + vote) | After both branches | Merge A∥B → **`ground_truth`** for B2 submission (`fuse_gt` in GLM logs) | Job code (no separate model call) |
+| **GLM** | Judge / QC | Compare recommend vs fuse → `glm/recommend.jsonl`, attach `silver` / `needs_hitl` | `FEN_LABEL_GLM_API_KEY` → `[fen_label_glm]` |
 
-**Không nhầm với crawl:**
+**Do not confuse with crawl:**
 
-| Mô hình | Stage | Việc làm | Key |
-|---------|-------|----------|-----|
-| **Gemini** (classify) | Enrich — calligraphy gate | Chỉ phân loại handwritten / printed / spam — **không** OCR chữ cho B2 | `FEN_CALLIGRAPHY_API_KEY` → `[fen_calligraphy]` |
-| Legacy single OCR | `fen_ocr_pipeline` | Một model — **không** dùng cho nộp B2 mới | `FEN_OCR_API_KEY` → `[fen_ocr]` |
+| Model | Stage | What it does | Key |
+|-------|-------|--------------|-----|
+| **Gemini** (classify) | Enrich — calligraphy gate | Classifies handwritten / printed / spam only — **does not** OCR text for B2 | `FEN_CALLIGRAPHY_API_KEY` → `[fen_calligraphy]` |
+| Legacy single OCR | `fen_ocr_pipeline` | One model — **not** used for new B2 submissions | `FEN_OCR_API_KEY` → `[fen_ocr]` |
 
-**Cột Task B2 (nộp):** `image`, `label`, `ground_truth` (từ fuse), `gemini` (text nhánh A), `post_link`.  
-Chi tiết field debug (`phases.*`, `text_b`, flags): mục dưới và `glm/recommend.jsonl`.
+**Task B2 columns (submission):** `image`, `label`, `ground_truth` (from fuse), `gemini` (branch A text), `post_link`.  
+Debug fields (`phases.*`, `text_b`, flags): see sections below and `glm/recommend.jsonl`.
 
 ---
 
-## 1. Pipeline nào tạo file gì?
+## 1. Which pipeline creates which files?
 
 ```mermaid
 flowchart LR
@@ -61,27 +61,27 @@ flowchart LR
   DL --> LD
 ```
 
-| DAG | Khi dùng | File JSONL / XLSX chính |
-|-----|----------|-------------------------|
-| **`fen_e2e_pipeline`** | Một batch crawl → label dual (**không** bắt đáy) | B1 + B2 (xem bảng dưới) |
-| **`fen_crawl_pipeline`** | Crawl nhiều batch + auto trigger label dual (`catch_bottom`) | B1 + B2 |
-| **`fen_label_dual_pipeline`** | Chỉ chạy label dual (đã có ảnh trên MinIO) | B2 |
-| `fen_ocr_pipeline` | Legacy — **không** dùng cho nộp B2 mới | `ocr/ocr_result.jsonl` only |
+| DAG | When to use | Main JSONL / XLSX files |
+|-----|-------------|-------------------------|
+| **`fen_e2e_pipeline`** | One crawl batch → label dual (**no** catch-bottom) | B1 + B2 (see tables below) |
+| **`fen_crawl_pipeline`** | Multi-batch crawl + auto-trigger label dual (`catch_bottom`) | B1 + B2 |
+| **`fen_label_dual_pipeline`** | Label dual only (images already on MinIO) | B2 |
+| `fen_ocr_pipeline` | Legacy — **not** used for new B2 submissions | `ocr/ocr_result.jsonl` only |
 
-Tất cả path dưới đây nằm trong bucket **`final-exam-nlp-raw`**, prefix **`facebook/{group_id}/`**.
+All paths below live in bucket **`final-exam-nlp-raw`**, prefix **`facebook/{group_id}/`**.
 
 ### B1 — Crawl (Task.xlsx sheet B1)
 
-| File | Nội dung |
+| File | Contents |
 |------|----------|
-| `export/valid_post.jsonl` | Post qua gate thư pháp |
-| `export/invalid_post.jsonl` | Post loại |
+| `export/valid_post.jsonl` | Posts that passed the calligraphy gate |
+| `export/invalid_post.jsonl` | Rejected posts |
 
-**Upsert:** theo `post_id`, ghi **một lần cuối batch enrich** (không flush từng post).
+**Upsert:** by `post_id`, written **once at the end of each enrich batch** (not flushed per post).
 
 ### B2 — Label dual (Task.xlsx sheet B2)
 
-| File | Nội dung |
+| File | Contents |
 |------|----------|
 | **`ocr/label_dual_pilot/task_b2.jsonl`** | MinIO — full B2 (+ `side_matter`) |
 | **`ocr/label_dual_pilot/task_b2.xlsx`** | MinIO — same as jsonl |
@@ -90,16 +90,16 @@ Tất cả path dưới đây nằm trong bucket **`final-exam-nlp-raw`**, prefi
 
 ### Pure Task B2 submit (local `/tmp` → host `output/`)
 
-Sau mỗi run label dual, job ghi thêm 2 file nộp thuần (bind mount `./output` → `/tmp/fen-output`):
+After each label dual run, the job also writes 2 pure submission files (bind mount `./output` → `/tmp/fen-output`):
 
-| Cột | Có |
-|-----|-----|
+| Column | Present |
+|--------|---------|
 | `image` | ✅ |
 | `label` | ✅ |
 | `ground_truth` | ✅ |
 | `gemini` | ✅ |
 | `post_link` | ✅ |
-| `side_matter` | ❌ không |
+| `side_matter` | ❌ no |
 
 ```
 output/{group_id}/
@@ -107,168 +107,168 @@ output/{group_id}/
   task_b2.xlsx
 ```
 
-Không lẫn flags / GLM / fuse metrics. MinIO `label_dual_pilot/` vẫn giữ bản đầy đủ (có `side_matter`) để debug.
+No flags / GLM / fuse metrics mixed in. MinIO `label_dual_pilot/` still keeps the full copy (with `side_matter`) for debugging.
 
-| File | Nội dung |
+| File | Contents |
 |------|----------|
 | `ocr/label_dual_pilot/glm/recommend.jsonl` | GLM + **`fuse_gt`**, bag, cer, … |
-| `ocr/label_dual_pilot/flags.jsonl` | QC từng ảnh (silver / flagged) |
+| `ocr/label_dual_pilot/flags.jsonl` | Per-image QC (silver / flagged) |
 
-### File chỉ số
+### Index files
 
-| File | Mục đích |
-|------|----------|
-| **`ocr/label_dual_pilot/summary.json`** | Thống kê run: `n_images`, `processed_this_run`, `skipped_this_run`, `n_silver`, `target`, `more_pending`, pointer tới task_b2 / GLM |
-| **`ocr/label_dual_pilot/checkpoint.json`** | `done_images[]`, `last_flush_at`, trạng thái chunk |
-| `ocr/label_dual_pilot/glm/summary.json` | Tóm tắt pass GLM |
-| `ocr/label_dual_pilot/parts/b2/batch_XX.jsonl` | Partial theo queue (1–12) — phục vụ resume |
+| File | Purpose |
+|------|---------|
+| **`ocr/label_dual_pilot/summary.json`** | Run stats: `n_images`, `processed_this_run`, `skipped_this_run`, `n_silver`, `target`, `more_pending`, pointers to task_b2 / GLM |
+| **`ocr/label_dual_pilot/checkpoint.json`** | `done_images[]`, `last_flush_at`, chunk state |
+| `ocr/label_dual_pilot/glm/summary.json` | GLM pass summary |
+| `ocr/label_dual_pilot/parts/b2/batch_XX.jsonl` | Partials by queue (1–12) — for resume |
 
-**HITL (không nộp bài):** `tester/manifest.json`, `tester/review.xlsx`.
+**HITL (not for submission):** `tester/manifest.json`, `tester/review.xlsx`.
 
 ---
 
-## 1.1 Chỉ số chi tiết (ngoài `task_b2`)
+## 1.1 Detailed metrics (beyond `task_b2`)
 
-`task_b2.jsonl` chỉ giữ **6 cột nộp B2** (`image`, `label`, `ground_truth`, `side_matter`, `gemini`, `post_link`).  
-Mọi chỉ số chất lượng / debug nằm ở các file khác dưới cùng prefix `ocr/label_dual_pilot/`.
+`task_b2.jsonl` keeps only the **6 B2 submission columns** (`image`, `label`, `ground_truth`, `side_matter`, `gemini`, `post_link`).  
+All quality / debug metrics live in other files under the same prefix `ocr/label_dual_pilot/`.
 
-### A. Chỉ số cấp run (một file JSON / run)
+### A. Run-level metrics (one JSON file per run)
 
-| File | Dùng để |
-|------|---------|
-| **`summary.json`** | Dashboard run: `n_images`, `processed_this_run`, `skipped_this_run`, `n_silver`, `n_flagged`, `target`, `more_pending`, `chunk`, `batch_results`, pointer GLM |
+| File | Used for |
+|------|----------|
+| **`summary.json`** | Run dashboard: `n_images`, `processed_this_run`, `skipped_this_run`, `n_silver`, `n_flagged`, `target`, `more_pending`, `chunk`, `batch_results`, GLM pointer |
 | **`checkpoint.json`** | Resume: `done_images[]`, `last_flush_at`, `more_pending`, `batch_seq` |
-| **`glm/summary.json`** | Tổng hợp GLM: `n_silver`, `n_hitl`, `n_agree_silver`, `n_pick_a/b`, `mean_conf_*`, `p50/p95_latency_ms`, `glm_flag_counts`, … |
+| **`glm/summary.json`** | GLM aggregate: `n_silver`, `n_hitl`, `n_agree_silver`, `n_pick_a/b`, `mean_conf_*`, `p50/p95_latency_ms`, `glm_flag_counts`, … |
 
-Ví dụ đọc nhanh:
+Quick read examples:
 
 ```bash
 mc cat local/final-exam-nlp-raw/facebook/{group_id}/ocr/label_dual_pilot/summary.json | python3 -m json.tool
 mc cat local/final-exam-nlp-raw/facebook/{group_id}/ocr/label_dual_pilot/glm/summary.json | python3 -m json.tool
 ```
 
-### B. Chỉ số cấp ảnh — `flags.jsonl`
+### B. Per-image metrics — `flags.jsonl`
 
-Một dòng / ảnh, upsert theo `image`:
+One line per image, upserted by `image`:
 
-| Field | Ý nghĩa |
+| Field | Meaning |
 |-------|---------|
-| `status` | `silver` = hai nhánh A≈B đủ sạch; `needs_hitl` = cần người xem |
-| `flags` | Tag lỗi/cảnh báo: `ocr_unreadable`, `paddle_empty`, `ui_chrome`, `ocr_suspect`, `seal_only`, … |
-| `post_id`, `post_link` | Liên kết về post Facebook |
+| `status` | `silver` = branches A≈B clean enough; `needs_hitl` = human review needed |
+| `flags` | Error/warning tags: `ocr_unreadable`, `paddle_empty`, `ui_chrome`, `ocr_suspect`, `seal_only`, … |
+| `post_id`, `post_link` | Link back to the Facebook post |
 
-Dùng để **lọc ảnh cần review** mà không mở từng page JSON.
+Use this to **filter images that need review** without opening every page JSON.
 
-### C. Chỉ số cấp ảnh — `glm/recommend.jsonl` (đầy đủ nhất)
+### C. Per-image metrics — `glm/recommend.jsonl` (most complete)
 
-Đây là log **per-image** của label dual. Mỗi dòng gồm:
+This is the **per-image** label dual log. Each line includes:
 
-| Nhóm field | Ví dụ chỉ số |
-|------------|----------------|
-| **GT & GLM** | `fuse_gt`, `recommend_ground_truth`, `agree_with_fuse` (trong `metrics`) |
-| **Trạng thái** | `page_status`, `review_bucket`, `glm_flags` |
-| **Hai nhánh OCR** | `text_a` (Gemini track), `text_b` (Paddle track) |
-| **`phases.*`** | `gemini`/`paddle`/`gpt_a`/`gpt_b`/`ds_a`/`ds_b` confidence, `n_ink`, `n_boxes`, latency Paddle |
+| Field group | Example metrics |
+|-------------|-----------------|
+| **GT & GLM** | `fuse_gt`, `recommend_ground_truth`, `agree_with_fuse` (in `metrics`) |
+| **Status** | `page_status`, `review_bucket`, `glm_flags` |
+| **Two OCR branches** | `text_a` (Gemini track), `text_b` (Paddle track) |
+| **`phases.*`** | `gemini`/`paddle`/`gpt_a`/`gpt_b`/`ds_a`/`ds_b` confidence, `n_ink`, `n_boxes`, Paddle latency |
 | **`phases.align`** | `cer`, `bag`, `cluster_bag`, `compact_bag`, `caption_align` |
 | **`phases.fuse`** | `gt_track`, `n_locked`, `n_hitl_spans` |
 | **`phases.glm`** | `pick`, `recommend_source`, `vote_score`, `gate_ok`, `latency_ms` |
 | **`metrics`** | `rec_vs_fuse_bag/cer`, `rec_vs_a_*`, `rec_vs_b_*`, box/ink conf mean/min, `vote` |
-| **`boxes`** | Raw boxes Gemini + Paddle (debug bbox) |
+| **`boxes`** | Raw Gemini + Paddle boxes (bbox debug) |
 
-**Quan hệ với B2:**
+**Relation to B2:**
 
-- `task_b2.ground_truth` = GT **fuse** (đã qua Gemini∥Paddle → fuse) — **cột nộp**.
-- `fuse_gt` trong recommend = cùng nguồn fuse, dùng so với `recommend_ground_truth` (GLM).
-- `glm_recommend` **không** tự ghi vào B2; chỉ gợi ý / đánh giá.
+- `task_b2.ground_truth` = **fuse** GT (after Gemini∥Paddle → fuse) — **submission column**.
+- `fuse_gt` in recommend = same fuse source, used to compare with `recommend_ground_truth` (GLM).
+- `glm_recommend` is **not** written into B2 automatically; it is suggestion / evaluation only.
 
-Raw GLM (prompt/response đầy đủ): `glm/runs/{run_id}.jsonl`.
+Raw GLM (full prompt/response): `glm/runs/{run_id}.jsonl`.
 
-### D. Sidecar fuse — `pages/{post_id}/{image}.json`
+### D. Fuse sidecar — `pages/{post_id}/{image}.json`
 
-Toàn bộ state fuse **một ảnh**: lines, locked_lines, hitl_spans, gemini/paddle tracks, caption_align, page_conf, …  
-Dùng khi cần debug sâu hơn `recommend.jsonl`. Re-run skip OCR nếu file page đã tồn tại.
+Full fuse state for **one image**: lines, locked_lines, hitl_spans, gemini/paddle tracks, caption_align, page_conf, …  
+Use when you need deeper debug than `recommend.jsonl`. Re-runs skip OCR if the page file already exists.
 
-### E. Partial & queue (resume / vận hành)
+### E. Partials & queues (resume / operations)
 
-| Path | Vai trò |
+| Path | Role |
+|------|------|
+| `parts/b2/batch_XX.jsonl` | B2 snapshot per queue 1–12 after each flush |
+| `parts/flags/batch_XX.jsonl` | Flags snapshot per queue |
+| `parts/glm/batch_XX.jsonl` | GLM snapshot per queue |
+| `queues/quote_batch_XX.jsonl` | Quote image queue (created by `prepare_queues`) |
+| `queues/priority_longline.jsonl` | Priority queue for long single-line GT |
+
+### F. Crawl (B1) — metrics outside label dual
+
+| File | Metrics |
 |------|---------|
-| `parts/b2/batch_XX.jsonl` | Snapshot B2 theo queue 1–12 sau mỗi flush |
-| `parts/flags/batch_XX.jsonl` | Snapshot flags theo queue |
-| `parts/glm/batch_XX.jsonl` | Snapshot GLM theo queue |
-| `queues/quote_batch_XX.jsonl` | Hàng đợi ảnh quote (tạo bởi `prepare_queues`) |
-| `queues/priority_longline.jsonl` | Queue ưu tiên GT một dòng dài |
-
-### F. Crawl (B1) — chỉ số ngoài label dual
-
-| File | Chỉ số |
-|------|--------|
 | `crawl/checkpoint.json` | `batch_seq`, `should_continue`, `stats.enriched/valid/invalid`, cursor |
-| `export/valid_post.jsonl` | Metadata post + calligraphy gate |
+| `export/valid_post.jsonl` | Post metadata + calligraphy gate |
 
-### G. Merge legacy (job có, DAG exam chưa expose)
+### G. Merge legacy (job exists; exam DAGs do not expose yet)
 
-`merge/task_b2_merged.jsonl`, `merge_manifest.jsonl`, `merge_summary.json` — so sánh fuse vs `ocr_result.jsonl` cũ (`bag_fuse_vs_legacy`, `diverge_flag`).
+`merge/task_b2_merged.jsonl`, `merge_manifest.jsonl`, `merge_summary.json` — compare fuse vs legacy `ocr_result.jsonl` (`bag_fuse_vs_legacy`, `diverge_flag`).
 
-### H. Tester HITL (không nộp)
+### H. Tester HITL (not for submission)
 
-`tester/review.xlsx` + `tester/manifest.json` — sheet review với `fuse_ground_truth`, `glm_recommend`, `cer`, `bag`, `page_status`, …
-
----
-
-### Tóm tắt: file nào đọc khi cần gì?
-
-| Mục đích | Đọc file |
-|----------|----------|
-| Nộp bài B2 thuần (không `side_matter`) | `output/{group_id}/task_b2.jsonl` / `.xlsx` |
-| Bản MinIO đầy đủ (có `side_matter`) | `ocr/label_dual_pilot/task_b2.jsonl` |
-| Xem run xong chưa, bao nhiêu ảnh | `summary.json`, `checkpoint.json` |
-| Lọc ảnh cần người xem | `flags.jsonl` (`status=needs_hitl`) |
-| So GLM vs fuse, CER/bag, conf từng phase | `glm/recommend.jsonl` |
-| Tổng hợp chất lượng GLM cả run | `glm/summary.json` |
-| Debug fuse từng dòng/chữ | `pages/...json` |
-| Chấm thủ công / HITL | `tester/review.xlsx` |
+`tester/review.xlsx` + `tester/manifest.json` — review sheet with `fuse_ground_truth`, `glm_recommend`, `cer`, `bag`, `page_status`, …
 
 ---
 
-## 2. Upsert hoạt động thế nào?
+### Summary: which file to read for what?
+
+| Purpose | Read file |
+|---------|-----------|
+| Pure B2 submission (no `side_matter`) | `output/{group_id}/task_b2.jsonl` / `.xlsx` |
+| Full MinIO copy (with `side_matter`) | `ocr/label_dual_pilot/task_b2.jsonl` |
+| Check if run finished, how many images | `summary.json`, `checkpoint.json` |
+| Filter images needing human review | `flags.jsonl` (`status=needs_hitl`) |
+| Compare GLM vs fuse, CER/bag, per-phase conf | `glm/recommend.jsonl` |
+| Aggregate GLM quality for the whole run | `glm/summary.json` |
+| Debug fuse line-by-line / character-level | `pages/...json` |
+| Manual grading / HITL | `tester/review.xlsx` |
+
+---
+
+## 2. How does upsert work?
 
 ### Label dual (B2)
 
-- Key: **`image`** (đường dẫn ảnh).
-- Mỗi lần flush: đọc jsonl cũ trên MinIO → merge map theo `image` → ghi lại.
-- Chạy lại **không** `force`: ảnh đã có page sidecar → **skip** OCR (vẫn có thể chạy GLM nếu thiếu).
-- `force=true`: OCR lại cả ảnh đã xong.
+- Key: **`image`** (image path).
+- Each flush: read existing jsonl on MinIO → merge map by `image` → write back.
+- Re-run without **`force`**: images that already have a page sidecar → **skip** OCR (GLM may still run if missing).
+- `force=true`: re-OCR even completed images.
 
 ### Crawl B1
 
 - Key: **`post_id`**.
-- Post đổi valid ↔ invalid được chuyển giữa `valid_post.jsonl` và `invalid_post.jsonl`.
+- Posts that flip valid ↔ invalid are moved between `valid_post.jsonl` and `invalid_post.jsonl`.
 
 ---
 
-## 3. Flush — bao nhiêu ảnh một lần?
+## 3. Flush — how many images at a time?
 
-Tham số DAG: **`flush_posts`** → env `FEN_LABEL_FLUSH_POSTS`.
+DAG param: **`flush_posts`** → env `FEN_LABEL_FLUSH_POSTS`.
 
-> Tên param là `flush_posts` nhưng **đếm theo ảnh** (`pending_b2`), không phải số post Facebook.
+> The param is named `flush_posts` but it **counts images** (`pending_b2`), not Facebook posts.
 
-| Nguồn | Giá trị mặc định |
-|-------|------------------|
+| Source | Default value |
+|--------|---------------|
 | `fen_label_dual_pipeline` | **5** |
 | `fen_e2e_pipeline` | **5** |
-| `fen_crawl_pipeline` → trigger label dual | **5** (truyền qua conf) |
-| Code job (`FLUSH_POSTS`) | 10 (chỉ khi không set env) |
+| `fen_crawl_pipeline` → trigger label dual | **5** (passed via conf) |
+| Job code (`FLUSH_POSTS`) | 10 (only when env is unset) |
 
-Mỗi flush ghi đồng thời (nếu có dữ liệu mới):
+Each flush writes concurrently (when there is new data):
 
-1. `parts/b2/batch_XX.jsonl` (snapshot queue)
+1. `parts/b2/batch_XX.jsonl` (queue snapshot)
 2. Upsert `task_b2.jsonl`
 3. Upsert `flags.jsonl`
 4. Upsert `glm/recommend.jsonl`
 
-Cuối run: build lại **`task_b2.xlsx`**, cập nhật **`summary.json`** + **`checkpoint.json`**.
+End of run: rebuild **`task_b2.xlsx`**, update **`summary.json`** + **`checkpoint.json`**.
 
-Ví dụ trigger với flush khác:
+Example trigger with a different flush:
 
 ```json
 {
@@ -280,60 +280,60 @@ Ví dụ trigger với flush khác:
 
 ---
 
-## 4. Tham số quan trọng
+## 4. Important parameters
 
-| Param | Ý nghĩa | Default |
+| Param | Meaning | Default |
 |-------|---------|---------|
-| `ocr_limit` / `label_limit` | Tối đa **ảnh pending** mỗi run; `0` = full queue | `0` |
-| `flush_posts` | Upsert jsonl mỗi N **ảnh** | `5` |
-| `prepare_queues` | Đồng bộ `quote_01..12` từ **`valid_post`**: thiếu shard / tập ảnh đổi → rebuild; trùng → giữ. Legacy: `FEN_LABEL_QUOTE_FILTER=true` | `true` |
-| `prepare_force` | Ép ghi lại queue dù tập ảnh không đổi | `false` |
-| `FEN_LABEL_CLEAN_GT` | Sau fuse: khử emoji/Latin/watermark trên GT+SM trước khi ghi B2 | `true` |
-| `FEN_LABEL_CLEAN_GT_KEEP_HAN_PUNCT` | Giữ dấu câu Hán `，。！？「」…` khi clean | `true` |
-| `glm` | Chạy GLM → `fuse_gt` trong recommend | `true` |
-| `force` | OCR lại ảnh đã xong | `false` |
-| `batch_seq` | **Quote shard** 1–12 (`0` = tất cả). Không phải crawl `batch_seq` | `0` |
-| `workers` | Song song (exam Docker: 4 an toàn) | `4` |
+| `ocr_limit` / `label_limit` | Max **pending images** per run; `0` = full queue | `0` |
+| `flush_posts` | Upsert jsonl every N **images** | `5` |
+| `prepare_queues` | Sync `quote_01..12` from **`valid_post`**: missing shard / changed image set → rebuild; unchanged → keep. Legacy: `FEN_LABEL_QUOTE_FILTER=true` | `true` |
+| `prepare_force` | Force rewrite queues even if the image set is unchanged | `false` |
+| `FEN_LABEL_CLEAN_GT` | After fuse: strip emoji/Latin/watermark from GT+SM before writing B2 | `true` |
+| `FEN_LABEL_CLEAN_GT_KEEP_HAN_PUNCT` | Keep Han punctuation `，。！？「」…` when cleaning | `true` |
+| `glm` | Run GLM → `fuse_gt` in recommend | `true` |
+| `force` | Re-OCR completed images | `false` |
+| `batch_seq` | **Quote shard** 1–12 (`0` = all). Not the crawl `batch_seq` | `0` |
+| `workers` | Parallelism (exam Docker: 4 is safe) | `4` |
 
-**`ocr_limit=0`:** bật `FEN_LABEL_UNLIMITED` — không bị giới hạn chunk 300 ảnh/run.
+**`ocr_limit=0`:** enables `FEN_LABEL_UNLIMITED` — not capped by the 300-images-per-run chunk.
 
-**E2E / sau crawl:** luôn dùng `batch_seq=0` (hoặc bỏ param) để OCR hết ảnh vừa crawl. Với ít ảnh, prepare chia vào queue 8–12; nếu set `batch_seq=1` sẽ chạy queue rỗng.
+**E2E / after crawl:** always use `batch_seq=0` (or omit the param) so all newly crawled images are OCR’d. With few images, prepare may place them in queues 8–12; setting `batch_seq=1` would run an empty queue.
 
 ---
 
-## 5. API keys cần có
+## 5. Required API keys
 
-Trong `.env` / `make configure`:
+In `.env` / `make configure`:
 
 | Key | Stage |
 |-----|-------|
-| `FEN_CALLIGRAPHY_API_KEY` | Enrich — gate thư pháp |
-| `FEN_LABEL_GEMINI_API_KEY` | Label dual — vision Gemini |
+| `FEN_CALLIGRAPHY_API_KEY` | Enrich — calligraphy gate |
+| `FEN_LABEL_GEMINI_API_KEY` | Label dual — Gemini vision |
 | `FEN_LABEL_GPT_API_KEY` | Label dual — GPT track |
 | `FEN_LABEL_GLM_API_KEY` | Label dual — GLM recommend |
-| `FEN_LABEL_DEEPSEEK_API_KEY` | Label dual — DeepSeek (nếu job dùng) |
-| Paddle | Không cần key — service `http://paddle-ocr:8080/ocr` trong Docker |
+| `FEN_LABEL_DEEPSEEK_API_KEY` | Label dual — DeepSeek (if the job uses it) |
+| Paddle | No key needed — service `http://paddle-ocr:8080/ocr` in Docker |
 
-`FEN_OCR_API_KEY` chỉ cho **`fen_ocr_pipeline`** (legacy).
+`FEN_OCR_API_KEY` is only for **`fen_ocr_pipeline`** (legacy).
 
 ---
 
-## 6. Kiểm tra nhanh trên MinIO
+## 6. Quick checks on MinIO
 
-Sau khi label dual chạy xong:
+After label dual finishes:
 
 ```bash
 make verify
-# hoặc MinIO console → final-exam-nlp-raw → facebook/{group_id}/ocr/label_dual_pilot/
+# or MinIO console → final-exam-nlp-raw → facebook/{group_id}/ocr/label_dual_pilot/
 ```
 
-| Cần thấy | Ý nghĩa |
-|----------|---------|
-| `task_b2.jsonl` | Có ít nhất 1 dòng B2 |
-| `summary.json` | Run đã kết thúc, có `n_images` |
-| `glm/recommend.jsonl` | Có `fuse_gt` (nếu `glm=true`) |
+| Should see | Meaning |
+|------------|---------|
+| `task_b2.jsonl` | At least 1 B2 line |
+| `summary.json` | Run finished, has `n_images` |
+| `glm/recommend.jsonl` | Has `fuse_gt` (if `glm=true`) |
 
-Đọc một dòng GLM:
+Read one GLM line:
 
 ```bash
 mc cat local/final-exam-nlp-raw/facebook/{group_id}/ocr/label_dual_pilot/glm/recommend.jsonl | head -1 | python3 -m json.tool
@@ -341,20 +341,20 @@ mc cat local/final-exam-nlp-raw/facebook/{group_id}/ocr/label_dual_pilot/glm/rec
 
 ---
 
-## 7. So với legacy `fen_ocr`
+## 7. Compared to legacy `fen_ocr`
 
 | | Label dual | Legacy `fen_ocr` |
 |--|------------|------------------|
 | Output | `ocr/label_dual_pilot/` | `ocr/ocr_result.jsonl` |
-| XLSX | Có `task_b2.xlsx` | Không |
-| `fuse_gt` | Có (GLM) | Không |
-| Index | `summary.json`, `checkpoint.json` | Chỉ log cuối run |
-| Flush default | 5 ảnh (DAG) | 5 ảnh (`FEN_OCR_FLUSH_EVERY`) |
+| XLSX | Has `task_b2.xlsx` | No |
+| `fuse_gt` | Yes (GLM) | No |
+| Index | `summary.json`, `checkpoint.json` | End-of-run log only |
+| Flush default | 5 images (DAG) | 5 images (`FEN_OCR_FLUSH_EVERY`) |
 
 ---
 
-## Tài liệu liên quan
+## Related docs
 
-- [USER_SETUP.md](USER_SETUP.md) — cài đặt & trigger JSON
+- [USER_SETUP.md](USER_SETUP.md) — setup & trigger JSON
 - [PIPELINE_BUILD_DEPLOY_RUN.md](PIPELINE_BUILD_DEPLOY_RUN.md) — build/deploy E2E
-- [GRADER_GUIDE.md](GRADER_GUIDE.md) — checklist chấm bài
+- [GRADER_GUIDE.md](GRADER_GUIDE.md) — grading checklist
