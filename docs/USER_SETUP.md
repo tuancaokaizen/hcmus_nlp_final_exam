@@ -56,7 +56,7 @@ discover → enrich → download → (label dual)
 2. Clone **`main`** → `cp .env.example .env` → `make configure`
 3. Mở `.env`, điền **`FEN_LABEL_GEMINI_API_KEY`**, **`FEN_LABEL_GPT_API_KEY`**, **`FEN_LABEL_GLM_API_KEY`** (wizard chỉ hỏi calligraphy + OCR — copy cùng key Ramcloud được)
 4. `make config` → `make up` (lần đầu build có thể 10–20 phút)
-5. `make fb-login-manual` → http://localhost:7900 (pass `secret`) → login Facebook
+5. `make fb-login-manual` → terminal in URL **http://localhost:7900** (pass `secret`). Có `FB_USERNAME`/`FB_PASSWORD` trong `.env` thì tự điền; bạn chỉ làm **2FA** trên noVNC.
 6. Airflow http://localhost:8080 (`admin`/`admin`) → **unpause** `fen_e2e_pipeline` → **Trigger**
 
 Smoke (rẻ API):
@@ -173,6 +173,7 @@ Không có `batch_size` — dùng **`batch_target`**.
 - Luôn chỉ **một** batch discover theo `batch_target`, rồi enrich → download → label dual.
 - Không có `catch_bottom` / rollover.
 - OCR dùng hết quote queue nội bộ (`batch_seq=0`); không cần truyền `batch_seq`.
+- `prepare_queues` so sánh tập ảnh với `valid_post`: **có ảnh mới → tự rebuild** `quote_01..12` (không còn skip vì queue stale). Ảnh đã OCR vẫn skip theo page sidecar.
 
 ### `fen_crawl_pipeline` — crawl + (tuỳ chọn) bắt đáy
 

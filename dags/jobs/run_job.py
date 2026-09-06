@@ -718,26 +718,53 @@ def _run_final_exam_nlp_bootstrap_login() -> None:
         if _probe_profile_session(driver):
             print("[final_exam_nlp_bootstrap_login] profile already logged in", flush=True)
         elif manual_login:
+            # Always print clickable noVNC URL first /
+            # Luôn in URL noVNC có thể bấm trước
+            print("", flush=True)
+            print("=" * 60, flush=True)
             print(
-                "[final_exam_nlp_bootstrap_login] MANUAL LOGIN — open noVNC and sign in to Facebook",
+                "[final_exam_nlp_bootstrap_login] Open noVNC now → http://localhost:7900",
                 flush=True,
             )
             print(
-                "[final_exam_nlp_bootstrap_login] noVNC: http://localhost:7900  password: secret",
+                "[final_exam_nlp_bootstrap_login] noVNC password: secret",
                 flush=True,
             )
-            try:
-                driver.get(FB_LOGIN_URL)
-            except Exception:
-                pass
+            print("=" * 60, flush=True)
+            print("", flush=True)
+            if fb_username and fb_password:
+                # Auto-fill user/pass; leave 2FA for human (unless TOTP set) /
+                # Tự điền user/pass; để người làm 2FA (trừ khi có TOTP)
+                print(
+                    "[final_exam_nlp_bootstrap_login] filling FB_USERNAME/PASSWORD from .env "
+                    "— finish 2FA in noVNC if prompted",
+                    flush=True,
+                )
+                _login_with_credentials(
+                    driver,
+                    fb_username,
+                    fb_password,
+                    fb_totp_secret,
+                    allow_manual_2fa=True,
+                )
+            else:
+                print(
+                    "[final_exam_nlp_bootstrap_login] no FB_USERNAME/PASSWORD in .env — "
+                    "type credentials yourself in noVNC",
+                    flush=True,
+                )
+                try:
+                    driver.get(FB_LOGIN_URL)
+                except Exception:
+                    pass
             print(
                 f"[final_exam_nlp_bootstrap_login] waiting up to {manual_wait_sec}s "
-                "for you to finish login (2FA OK)…",
+                "for login/2FA…  →  http://localhost:7900",
                 flush=True,
             )
             if not _wait_logged_in(driver, manual_wait_sec):
                 raise RuntimeError(
-                    "Manual login timed out — finish Facebook login in noVNC "
+                    "Manual login timed out — finish Facebook login/2FA in noVNC "
                     f"(http://localhost:7900) within {manual_wait_sec}s"
                 )
             print("[final_exam_nlp_bootstrap_login] manual login detected", flush=True)

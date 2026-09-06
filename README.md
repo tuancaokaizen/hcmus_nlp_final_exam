@@ -22,7 +22,7 @@ cp .env.example .env
 make configure          # FB (optional) + calligraphy/OCR key
 # Mở .env: điền FEN_LABEL_GEMINI/GPT/GLM(_DEEPSEEK)_API_KEY (có thể copy cùng key Ramcloud)
 make up                 # lần đầu build có thể 10–20 phút
-make fb-login-manual    # http://localhost:7900 — password: secret → login FB tay
+make fb-login-manual    # http://localhost:7900 (pass: secret); .env user/pass auto-fill → bạn chỉ 2FA
 ```
 
 Airflow http://localhost:8080 (`admin` / `admin`) → unpause **`fen_e2e_pipeline`** → Trigger:

@@ -98,14 +98,17 @@ def _trigger_label_dual_batch(**context) -> str:
     flush_posts = int(_resolve_param(context, "flush_posts", 5))
     force = bool(_resolve_param(context, "force", False))
     dag_run_id = f"fen_label_dual_g{group_id}_b{batch_seq:06d}"
+    # Label dual batch_seq = quote shard (0 = all), not crawl batch_seq /
+    # batch_seq của label dual = shard quote (0 = hết), không phải crawl batch_seq
     conf = {
         "group_id": group_id,
-        "batch_seq": batch_seq,
+        "batch_seq": 0,
         "label_limit": label_limit,
         "flush_posts": flush_posts,
         "force": force,
         "prepare_queues": True,
         "glm": True,
+        "crawl_batch_seq": batch_seq,
     }
     try:
         run_id = trigger_dag(
