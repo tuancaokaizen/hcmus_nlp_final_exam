@@ -373,8 +373,9 @@ Rules:
 """
 
 GPT_REFINE_PROMPT = """You refine OCR COLUMN lines of Chinese calligraphy.
-Each input string is already one vertical column (top-to-bottom).
-You may ONLY: (1) reorder columns right-to-left, (2) split a column into verse lines using the SAME characters.
+Each input string is already one vertical column (top-to-bottom), already ordered RIGHT-to-LEFT.
+You may ONLY: (1) keep that RIGHT-to-LEFT column order, (2) split a column into verse lines using the SAME characters.
+Do NOT reverse columns to left-to-right.
 Do NOT emit one character per line.
 Do NOT invent, replace, simplify, or add characters.
 Do NOT copy Facebook captions or UI text.
@@ -382,7 +383,7 @@ Do NOT copy Facebook captions or UI text.
 Return ONLY JSON:
 {{"confidence": 0.0, "layout": "rtl_columns|ltr_columns|grid|unknown", "calligraphy_lines": ["..."], "flags": []}}
 
-Input columns (JSON):
+Input columns (JSON, already RTL):
 {lines_json}
 """
 
@@ -1595,6 +1596,74 @@ def _chat_json(prompt: str, model: str) -> tuple[dict[str, Any] | None, float, s
     return parsed, _clamp_conf(parsed.get("confidence"), 0.0), None
 
 
+def _lock_lines_to_rtl_src(
+    src_lines: list[str],
+    refined: list[str],
+) -> tuple[list[str], bool]:
+    """Re-attach refined lines to geometric RTL source column order.
+
+    Gắn lại dòng sau refine theo thứ tự cột RTL hình học (src).
+    Returns (ordered_lines, changed).
+    """
+    src = [str(x).strip() for x in src_lines if str(x).strip()]
+    ref = [str(x).strip() for x in refined if str(x).strip()]
+    if not ref:
+        return src, bool(src)
+    if not src:
+        return ref, False
+    # Same page CJK bag must hold / Cùng túi chữ CJK của trang
+    if invented_chars("\n".join(src), "\n".join(ref)):
+        return src, True
+
+    # Equal count: bipartite match → emit in src (RTL) order /
+    # Cùng số dòng: ghép tối ưu → xuất theo thứ tự src (RTL)
+    if len(ref) == len(src):
+        used: set[int] = set()
+        out: list[str] = []
+        for s in src:
+            best_j, best_sc = -1, -1.0
+            for j, r in enumerate(ref):
+                if j in used:
+                    continue
+                sc = bag_dice(s, r)
+                if sc > best_sc:
+                    best_sc, best_j = sc, j
+            if best_j < 0 or best_sc < 0.5:
+                return ref, False
+            used.add(best_j)
+            out.append(ref[best_j])
+        return out, out != ref
+
+    # More refined lines (splits): assign each to best src parent, flatten RTL /
+    # Nhiều dòng hơn (tách câu): gán về cột src, flatten theo RTL
+    if len(ref) > len(src):
+        buckets: list[list[tuple[int, str]]] = [[] for _ in src]
+        for j, r in enumerate(ref):
+            best_i, best_sc = 0, -1.0
+            rc = compact_cjk(r)
+            for i, s in enumerate(src):
+                sc = bag_dice(s, r)
+                # Prefer containment when split from one column /
+                # Ưu tiên containment khi tách từ một cột
+                scjk = compact_cjk(s)
+                if rc and scjk and rc in scjk:
+                    sc = max(sc, 0.99)
+                if sc > best_sc:
+                    best_sc, best_i = sc, i
+            buckets[best_i].append((j, r))
+        out = []
+        for bucket in buckets:
+            bucket.sort(key=lambda t: t[0])
+            out.extend(t[1] for t in bucket)
+        return out, out != ref
+
+    # Fewer lines (merge): keep refined only if bag matches; else src /
+    # Ít dòng hơn (gộp): giữ refined nếu bag khớp; không thì src
+    if bag_dice("\n".join(src), "\n".join(ref)) >= 0.9:
+        return ref, False
+    return src, True
+
+
 def _refine_lines(lines: list[str], model: str) -> tuple[list[str], float, list[str]]:
     """GPT refine; reject invented CJK / GPT tinh chỉnh; từ chối CJK bịa."""
     flags: list[str] = []
@@ -1611,10 +1680,14 @@ def _refine_lines(lines: list[str], model: str) -> tuple[list[str], float, list[
     if invented_chars(raw_join, "\n".join(refined)):
         flags.append("invented_chars_rejected")
         return lines, 0.0, flags
-    layout = str(parsed.get("layout") or "")
+    layout = str(parsed.get("layout") or "").strip()
     if layout == "unknown" and len(refined) <= 1:
         flags.append("layout_unknown")
-    return refined or lines, conf, flags
+    # Lock column order to geometric RTL input / Khóa thứ tự cột về RTL hình học
+    locked, changed = _lock_lines_to_rtl_src(lines, refined)
+    if layout == "ltr_columns" or changed:
+        flags.append("rtl_order_restored")
+    return locked or lines, conf, flags
 
 
 def _eval_lines(lines: list[str], model: str) -> tuple[list[str], float, str, list[str]]:
@@ -1640,7 +1713,12 @@ def _eval_lines(lines: list[str], model: str) -> tuple[list[str], float, str, li
         order = "unknown"
     if order == "unknown" and len(refined) <= 1:
         flags.append("layout_unknown")
-    return refined or lines, conf, order, flags
+    # Never keep LTR permute from eval / Không giữ permute LTR từ eval
+    locked, changed = _lock_lines_to_rtl_src(lines, refined)
+    if order == "ltr_columns" or changed:
+        flags.append("rtl_order_restored")
+        order = "rtl_columns" if order == "ltr_columns" else order
+    return locked or lines, conf, order, flags
 
 
 def _eval_or_passthrough(

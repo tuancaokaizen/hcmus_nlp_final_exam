@@ -2,6 +2,11 @@
 # Stack đầy đủ cho crawl → classify → OCR demo
 name: fen-exam
 
+# Pin Cloudflare IPv4 — Docker Desktop often resolves AAAA-only and times out /
+# Ghim IPv4 Cloudflare — Docker Desktop hay chỉ resolve AAAA rồi timeout
+x-ramclouds-hosts: &ramclouds-hosts
+  - "ramclouds.me:172.67.144.35"
+
 x-airflow-common: &airflow-common
   build:
     context: .
@@ -25,6 +30,12 @@ x-airflow-common: &airflow-common
     FEN_MINIO_ENDPOINT: http://minio:9000
     AIRFLOW__CORE__DAGS_FOLDER: /opt/fen-exam/dags
     FEN_HOST_PROJECT_DIR: ${FEN_HOST_PROJECT_DIR:-}
+  # Prefer public DNS + pinned IPv4 for LLM gateway /
+  # Ưu tiên DNS public + IPv4 ghim cho LLM gateway
+  dns:
+    - 8.8.8.8
+    - 1.1.1.1
+  extra_hosts: *ramclouds-hosts
   volumes:
     - ./:/opt/fen-exam
     - /var/run/docker.sock:/var/run/docker.sock
@@ -122,6 +133,10 @@ services:
       dockerfile: Dockerfile
     ports:
       - "8088:8080"
+    # Host-prefetched models — Docker VM often cannot download them /
+    # Model tải sẵn trên host — Docker VM thường không tải được
+    volumes:
+      - ./data/paddlex:/root/.paddlex
     environment:
       PADDLE_MAX_IMAGE_SIDE: "2400"
 
@@ -157,6 +172,10 @@ services:
       FEN_PATHS_OUTPUT_DIR: /tmp/fen-output
       SELENIUM_REMOTE_URL: http://selenium-chrome:4444/wd/hub
       PADDLE_SERVICE_URL: http://paddle-ocr:8080
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    extra_hosts: *ramclouds-hosts
     volumes:
       - ./dags:/opt/fen-exam/dags:ro
       - ./output:/tmp/fen-output
@@ -169,3 +188,11 @@ volumes:
   postgres-data:
   selenium-profile:
   airflow-logs:
+
+# Lower MTU — Docker Desktop Mac often times out HTTPS when MTU=1500 /
+# Giảm MTU — Docker Desktop Mac hay timeout HTTPS khi MTU=1500
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "1400"

@@ -16,3 +16,20 @@ config.k3s-new
 report/
 scripts/fetch_k3s_minio_stats.sh
 scripts/fetch-k3s*
+
+# Prefetched Paddle models (large) / Model Paddle tải sẵn
+data/paddlex/
+
+# Adhoc reviewer pack /
+# Gói reviewer adhoc
+# Track for graders: top50 + images + run script; ignore export adhoc + bulky /
+# Commit cho giám khảo: top50 + ảnh + script chạy; bỏ export adhoc + file nặng
+reviewer_test/adhoc_export_top50.py
+reviewer_test/dataset/dataset_full.jsonl
+reviewer_test/dataset/export_summary.json
+reviewer_test/dataset/rtl_fix_4.jsonl
+reviewer_test/output/
+reviewer_test/.env
+reviewer_test/.venv/
+reviewer_test/**/__pycache__/
+reviewer_test/**/*.log

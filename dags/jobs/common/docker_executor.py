@@ -45,6 +45,12 @@ def build_fen_job_task(
         "FEN_PATHS_OUTPUT_DIR": "/tmp/fen-output",
         **(env_vars or {}),
     }
+    # Pin ramclouds IPv4 — Docker Desktop AAAA-only causes Connection timeout /
+    # Ghim IPv4 ramclouds — Docker Desktop chỉ AAAA hay bị Connection timeout
+    extra_hosts = operator_kwargs.pop(
+        "extra_hosts",
+        {"ramclouds.me": "172.67.144.35"},
+    )
     return DockerOperator(
         task_id=task_id,
         image=settings["image"],
@@ -53,6 +59,7 @@ def build_fen_job_task(
         docker_url="unix://var/run/docker.sock",
         network_mode=f"{settings['compose_project']}_default",
         environment=environment,
+        extra_hosts=extra_hosts,
         mounts=[
             Mount(
                 source=f"{settings['project_dir']}/dags",

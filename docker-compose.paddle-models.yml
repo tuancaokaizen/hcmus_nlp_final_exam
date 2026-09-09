@@ -1,0 +1,8 @@
+services:
+  paddle-ocr:
+    volumes:
+      - ./data/paddlex:/root/.paddlex
+    environment:
+      PADDLE_MAX_IMAGE_SIDE: "2400"
+      # Prefer local cache; skip hoster healthcheck if models present /
+      # Ưu tiên cache local; bỏ healthcheck hoster nếu đã có model
