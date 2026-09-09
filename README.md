@@ -209,6 +209,8 @@ Prepare workspace → build images (if missing) → MinIO/Postgres/Airflow/Paddl
 | Default | `FEN_DAG_SOURCE=minio` | MinIO → sidecar |
 | Fast dev | `make up-dev` | Bind mount `./dags` |
 
+Default mode needs host `mc` + a successful `make deploy`. Otherwise Airflow may raise `No module named 'common'` (empty/incomplete sync volume). Fix: install `mc` → `make deploy` (wait ~30s), or use `make up-dev`. See [USER_SETUP.md](docs/USER_SETUP.md) §2 / [LOCAL_SETUP_LOG.md](docs/LOCAL_SETUP_LOG.md) §6.
+
 ### Make cheat sheet
 
 | Target | Action |

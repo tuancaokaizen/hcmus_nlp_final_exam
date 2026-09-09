@@ -30,6 +30,7 @@ from final_exam_nlp_crawl_runner import (
 )
 from final_exam_nlp_graphql_batch import (
     PAGINATION_QUERY,
+    _dom_harvest_candidates,
     _drain_cdp_sniffer_bodies,
     _drain_cdp_sniffer_capture,
     _drain_fetch_hook,
@@ -80,6 +81,25 @@ MAX_SCROLL_ROUNDS = 40
 # Số lần recapture trong một job (reload crawl_graphql.py)
 MAX_REPLAY_RELOADS = 2
 DEFAULT_DUMP_PREFIX = "facebook_seed2"
+
+def _driver_session_alive(driver) -> bool:
+    """True when Selenium session still accepts commands.
+    True khi session Selenium vẫn nhận lệnh.
+    """
+    try:
+        _ = driver.current_url
+        return True
+    except Exception:
+        return False
+
+
+def _on_group_feed(driver, group_id: str) -> bool:
+    """True if current URL is the target Facebook group.
+    True nếu URL hiện tại đang ở group Facebook mục tiêu.
+    """
+    cur = getattr(driver, "current_url", "") or ""
+    return f"/groups/{group_id}" in cur
+
 
 # Strip offscreen media without deleting React nodes (RAM) /
 # Gỡ media ngoài viewport, không xóa node React (RAM)
@@ -455,8 +475,8 @@ def run_discover_batch(
     cursor_from_scroll: str | None = None
 
     try:
-        # Login first, then CDP — attaching CDP before login kills the Grid session /
-        # Login trước, rồi mới CDP — gắn CDP trước login sẽ giết session Grid
+        # Login first, then prepare feed WITHOUT CDP→navigate (that kills Grid Chrome) /
+        # Login trước, chuẩn bị feed KHÔNG CDP→navigate (làm chết Chrome trên Grid)
         try:
             driver.get("about:blank")
         except Exception:
@@ -479,29 +499,122 @@ def run_discover_batch(
             fb_totp_secret="",
             upload_minio=True,
         )
-        # Only start CDP sniffer after login, and only when we still need the form /
-        # Chỉ bật CDP sniffer sau login, và chỉ khi còn cần bắt form
-        if need_capture:
-            _enable_network_cdp(driver)
-        _install_fetch_hook(driver)
-        # Re-get after CDP often crashes Chrome ("renderer disconnected") — refresh if already on group /
-        # get lại sau CDP hay làm Chrome crash — nếu đã ở group thì chỉ refresh
-        cur = (getattr(driver, "current_url", "") or "")
-        already_on_group = f"/groups/{group_id}" in cur
-        try:
-            if already_on_group:
-                print(f"{LOG} already on group — refresh instead of get", flush=True)
-                driver.refresh()
-            else:
+
+        def _prepare_feed_for_capture(*, enable_cdp: bool) -> None:
+            """HVB order: fetch hook → open feed (no refresh) → optional CDP → scroll-ready.
+            Thứ tự HVB: fetch hook → mở feed (không refresh) → CDP tùy chọn → sẵn sàng scroll.
+            """
+            # Hook before feed traffic / Hook trước traffic feed
+            _install_fetch_hook(driver)
+            if not _on_group_feed(driver, group_id):
+                print(f"{LOG} open group feed (pre-cdp)", flush=True)
                 driver.get(group_feed)
-        except Exception as nav_exc:
-            print(f"{LOG} post-cdp navigation failed ({nav_exc!r}) — retry get once", flush=True)
-            time.sleep(2)
-            driver.get(group_feed)
-        # tests/crawl_graphql.py waits 6–9s after open /
-        # tests/crawl_graphql.py chờ 6–9s sau khi mở
-        _human_pause(7.5, 1.5, 1.5)
-        _install_fetch_hook(driver)
+                _human_pause(7.5, 1.5, 1.5)
+            else:
+                # Already on group after login — do NOT refresh (CDP crash trigger) /
+                # Đã ở group sau login — KHÔNG refresh (gây crash CDP)
+                print(
+                    f"{LOG} already on group — skip refresh (HVB-safe)",
+                    flush=True,
+                )
+                _human_pause(2.0, 0.4, 0.8)
+            # CDP sniffer only after page is stable / Chỉ bật CDP khi page đã ổn
+            if enable_cdp:
+                _enable_network_cdp(driver)
+            _install_fetch_hook(driver)
+            try:
+                driver.execute_script("window.scrollTo(0, 600);")
+                _human_pause(1.0, 0.2, 0.5)
+            except Exception:
+                pass
+
+        def _rebuild_driver_session(*, enable_cdp: bool) -> None:
+            """Soft-restart Chrome after InvalidSessionId (HVB soft_restart pattern).
+            Soft-restart Chrome sau InvalidSessionId (pattern soft_restart HVB).
+            """
+            nonlocal driver, cookies
+            print(f"{LOG} soft_restart_driver after dead session", flush=True)
+            _stop_cdp_graphql_sniffer()
+            _safe_quit_driver(driver)
+            _drain_selenium_sessions(remote)
+            _selenium_preflight(remote)
+            driver = _build_driver(remote, headless, timeout, enable_perf_logs=True)
+            cookies = _ensure_driver_login(
+                driver=driver,
+                bucket=bucket,
+                source_prefix=source_prefix,
+                group_id=group_id,
+                start_url=group_feed,
+                cookies=cookies,
+                fb_username="",
+                fb_password="",
+                fb_totp_secret="",
+                upload_minio=True,
+            )
+            _prepare_feed_for_capture(enable_cdp=enable_cdp)
+
+        def _ingest_dom_harvest(reason: str) -> int:
+            """Append posts from embedded page JSON when GraphQL is thin.
+            Thêm post từ JSON nhúng trang khi GraphQL mỏng.
+            """
+            nonlocal skip_run, mode, backfill_cursor, reached_2013, stop_reason, has_next
+            nonlocal replay_cursor
+            if len(new_rows) >= batch_size:
+                return 0
+            try:
+                cands = _dom_harvest_candidates(driver, group_id)
+            except Exception as exc:
+                print(f"{LOG} dom_harvest_err={type(exc).__name__}", flush=True)
+                return 0
+            if not cands:
+                return 0
+            (
+                skip_run,
+                page_new,
+                page_skip,
+                mode,
+                cursor_switch,
+                hit_bottom,
+            ) = _append_candidates(
+                cands=cands,
+                group_id=group_id,
+                seen=seen,
+                new_rows=new_rows,
+                batch_size=batch_size,
+                bottom_year=bottom_year,
+                skip_run=skip_run,
+                skip_streak=skip_streak,
+                mode=mode,
+                backfill_cursor=backfill_cursor,
+                bucket=bucket,
+                source_prefix=source_prefix,
+                extra_skip=dump_skip,
+            )
+            if cursor_switch:
+                replay_cursor = cursor_switch
+            if hit_bottom:
+                reached_2013 = True
+                stop_reason = f"reached_bottom_year_{bottom_year}"
+                has_next = False
+            if page_new:
+                print(
+                    f"{LOG} dom_harvest reason={reason} +{page_new} "
+                    f"skip={page_skip} total={len(new_rows)}",
+                    flush=True,
+                )
+            return int(page_new)
+
+        session_retries = 0
+        try:
+            _prepare_feed_for_capture(enable_cdp=need_capture)
+        except Exception as prep_exc:
+            name = type(prep_exc).__name__
+            print(f"{LOG} prepare_feed_err={name}: {prep_exc!r}", flush=True)
+            if "InvalidSession" in name or "invalid session" in str(prep_exc).lower():
+                _rebuild_driver_session(enable_cdp=need_capture)
+                session_retries += 1
+            else:
+                raise
 
         # If capture already on MinIO — skip SCROLL, go REPLAY (practice) /
         # Nếu đã có capture trên MinIO — bỏ SCROLL, vào REPLAY
@@ -522,7 +635,17 @@ def run_discover_batch(
             )
             barren = 0
             prev_total = len(new_rows)
+            # First DOM harvest on loaded feed (HVB) /
+            # Harvest DOM ngay trên feed đã load (HVB)
+            _ingest_dom_harvest("feed_loaded")
             for round_idx in range(1, MAX_SCROLL_ROUNDS + 1):
+                if not _driver_session_alive(driver):
+                    if session_retries >= 2:
+                        print(f"{LOG} session_dead after {session_retries} rebuilds", flush=True)
+                        break
+                    session_retries += 1
+                    _rebuild_driver_session(enable_cdp=True)
+                    continue
                 # Practice: form + cursor → replay; or form alone after enough scrolls /
                 # Practice: form + cursor → replay; hoặc chỉ form sau đủ scroll
                 if _capture_is_valid(captured, group_id) and (
@@ -608,8 +731,13 @@ def run_discover_batch(
                     driver.execute_script(
                         "window.scrollTo(0, document.body.scrollHeight);"
                     )
-                except Exception:
-                    pass
+                except Exception as scroll_exc:
+                    if "InvalidSession" in type(scroll_exc).__name__:
+                        if session_retries >= 2:
+                            break
+                        session_retries += 1
+                        _rebuild_driver_session(enable_cdp=True)
+                        continue
                 time.sleep(random.uniform(*SCROLL_PAUSE))
 
                 _drain_perf_capture(driver, captured, pending_req)
@@ -671,6 +799,11 @@ def run_discover_batch(
                     if len(new_rows) >= batch_size:
                         break
 
+                # HVB: rich DOM harvest every 2 scroll rounds /
+                # HVB: harvest DOM giàu mỗi 2 vòng scroll
+                if round_idx % 2 == 0:
+                    _ingest_dom_harvest(f"scroll_round_{round_idx}")
+
                 if reached_2013 or len(new_rows) >= batch_size:
                     break
 
@@ -693,13 +826,24 @@ def run_discover_batch(
             # NEVER invent capture from HTML (that produced group_id as doc_id) /
             # KHÔNG BAO GIỜ bịa capture từ HTML (đã sinh group_id làm doc_id)
             if not _capture_is_valid(captured, group_id):
-                print(
-                    f"{LOG} missing_graphql_capture — need real "
-                    f"{PAGINATION_QUERY} network request (no HTML invent)",
-                    flush=True,
-                )
-                stop_reason = "missing_graphql_capture"
-                has_next = False
+                # Final DOM fallback before declaring capture missing /
+                # Fallback DOM cuối trước khi báo thiếu capture
+                _ingest_dom_harvest("pre_missing_capture")
+                if new_rows:
+                    print(
+                        f"{LOG} missing_graphql_capture but dom_harvest "
+                        f"new={len(new_rows)} — continue enrich path",
+                        flush=True,
+                    )
+                    stop_reason = "dom_harvest_no_graphql_capture"
+                else:
+                    print(
+                        f"{LOG} missing_graphql_capture — need real "
+                        f"{PAGINATION_QUERY} network request (no HTML invent)",
+                        flush=True,
+                    )
+                    stop_reason = "missing_graphql_capture"
+                    has_next = False
             else:
                 _save_capture(bucket, source_prefix, group_id, captured)
                 print(
@@ -738,10 +882,23 @@ def run_discover_batch(
                 _clear_stored_capture(bucket, source_prefix, group_id)
                 captured.clear()
                 _strip_offscreen_media(driver)
+                if not _driver_session_alive(driver):
+                    _rebuild_driver_session(enable_cdp=False)
+                # Navigate FIRST, attach CDP AFTER (never CDP → refresh) /
+                # Navigate TRƯỚC, gắn CDP SAU (không bao giờ CDP → refresh)
                 try:
+                    _install_fetch_hook(driver)
                     driver.get(group_feed)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    print(f"{LOG} recapture_nav_err={type(exc).__name__}", flush=True)
+                    if "InvalidSession" in type(exc).__name__:
+                        _rebuild_driver_session(enable_cdp=False)
+                        try:
+                            driver.get(group_feed)
+                        except Exception:
+                            return False
+                    else:
+                        return False
                 _human_pause(7.5, 1.5, 1.5)
                 _enable_network_cdp(driver)
                 _install_fetch_hook(driver)
@@ -758,6 +915,8 @@ def run_discover_batch(
                     _drain_perf_capture(driver, captured, pending_req)
                     _drain_cdp_sniffer_capture(captured)
                     _drain_fetch_hook(driver, captured)
+                    if round_idx % 2 == 0:
+                        _ingest_dom_harvest(f"recapture_round_{round_idx}")
                     if _capture_is_valid(captured, group_id):
                         _save_capture(bucket, source_prefix, group_id, captured)
                         print(f"{LOG} recaptured pagination form", flush=True)
@@ -942,6 +1101,11 @@ def run_discover_batch(
         # Keep going next DAG run after recapture / Chạy DAG sau sau khi recapture
         should_continue = not reached_2013
         has_next = True
+    if stop_reason == "dom_harvest_no_graphql_capture":
+        # DOM filled batch; next run can still try GraphQL capture /
+        # DOM đã đủ batch; run sau vẫn thử capture GraphQL
+        should_continue = not reached_2013
+        has_next = True
     if len(new_rows) == 0 and not reached_2013 and stop_reason != "missing_graphql_capture":
         should_continue = True
         has_next = True
@@ -980,7 +1144,7 @@ def run_discover_batch(
         flush=True,
     )
     return {
-        "ok": stop_reason != "missing_graphql_capture",
+        "ok": stop_reason not in {"missing_graphql_capture", "missing_cookies"},
         "batch_seq": batch_seq,
         "new_count": len(new_rows),
         "valid": n_valid,

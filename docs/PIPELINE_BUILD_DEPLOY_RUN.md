@@ -83,6 +83,8 @@ sequenceDiagram
 
 **Note:** `fen-job` (DockerOperator) still mounts `FEN_HOST_PROJECT_DIR/dags` from the host to run jobs + `config.ini` — only Airflow’s **DAG parse** switches to MinIO when `FEN_DAG_SOURCE=minio`.
 
+**Troubleshooting:** `No module named 'common'` usually means the sync volume is missing `jobs/common/` (no `mc` → deploy skipped, or sync not finished). Install `mc`, run `make deploy`, wait ~30s — or use `make up-dev` / `FEN_DAG_SOURCE=local`. Details: [USER_SETUP.md](USER_SETUP.md) §2, [LOCAL_SETUP_LOG.md](LOCAL_SETUP_LOG.md) §6.
+
 After editing DAGs in `minio` mode:
 
 ```bash

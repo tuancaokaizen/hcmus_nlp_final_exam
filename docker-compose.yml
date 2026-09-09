@@ -2,11 +2,6 @@
 # Stack đầy đủ cho crawl → classify → OCR demo
 name: fen-exam
 
-# Pin Cloudflare IPv4 — Docker Desktop often resolves AAAA-only and times out /
-# Ghim IPv4 Cloudflare — Docker Desktop hay chỉ resolve AAAA rồi timeout
-x-ramclouds-hosts: &ramclouds-hosts
-  - "ramclouds.me:172.67.144.35"
-
 x-airflow-common: &airflow-common
   build:
     context: .
@@ -30,12 +25,11 @@ x-airflow-common: &airflow-common
     FEN_MINIO_ENDPOINT: http://minio:9000
     AIRFLOW__CORE__DAGS_FOLDER: /opt/fen-exam/dags
     FEN_HOST_PROJECT_DIR: ${FEN_HOST_PROJECT_DIR:-}
-  # Prefer public DNS + pinned IPv4 for LLM gateway /
-  # Ưu tiên DNS public + IPv4 ghim cho LLM gateway
+  # Public DNS only — call https://ramclouds.me with normal resolution (no IP pin) /
+  # Chỉ DNS public — gọi https://ramclouds.me resolve thường (không ghim IP)
   dns:
     - 8.8.8.8
     - 1.1.1.1
-  extra_hosts: *ramclouds-hosts
   volumes:
     - ./:/opt/fen-exam
     - /var/run/docker.sock:/var/run/docker.sock
@@ -175,7 +169,6 @@ services:
     dns:
       - 8.8.8.8
       - 1.1.1.1
-    extra_hosts: *ramclouds-hosts
     volumes:
       - ./dags:/opt/fen-exam/dags:ro
       - ./seeds:/opt/fen-exam/seeds:ro

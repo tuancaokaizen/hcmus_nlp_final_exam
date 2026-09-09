@@ -128,6 +128,14 @@ Force image rebuild: `make bootstrap`.
 | Default (`FEN_DAG_SOURCE=minio`) | Grading / new machine (needs `mc`) |
 | `make up-dev` | Editing DAGs often |
 
+**If Airflow shows `No module named 'common'`:** with default MinIO mode, Airflow parses DAGs from the sync volume (`airflow-dags-cache`), not your host `./dags`. That volume must contain `jobs/common/` after deploy + sidecar sync.
+
+1. Install [`mc`](https://min.io/docs/minio/linux/reference/minio-client/minio-mc.html) on the host (required for `make deploy` / `make up` in MinIO mode).
+2. Re-run `make deploy`, wait ~30s for `airflow-dag-sync`, then refresh the DAG list.
+3. Or skip the sidecar: `make up-dev` / `FEN_DAG_SOURCE=local make up` (bind-mount `./dags`).
+
+If `make up` printed `WARN: 'mc' not on PATH — … Skipping deploy`, you will hit this until `mc` is installed and deploy runs.
+
 ---
 
 ## 3. Daily loop

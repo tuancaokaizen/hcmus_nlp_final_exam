@@ -141,7 +141,43 @@ If login OK but upload fails with `SignatureDoesNotMatch`: `make config` then re
 - `dags/jobs/run_job.py` — `FEN_MANUAL_LOGIN` / noVNC wait
 - `Makefile` — `fb-login-manual` target
 
-## 6. Next steps
+## 6. Common errors
+
+### `No module named 'common'` (Airflow DAG import)
+
+**Symptom:** Scheduler / UI import error on `fen_*` DAGs; stack mentions `from common.docker_executor import …`.
+
+**Cause:** Default `FEN_DAG_SOURCE=minio` makes Airflow read volume `airflow-dags-cache` (filled by `airflow-dag-sync` from MinIO). If `mc` was missing, deploy was skipped, or sync has not finished, `jobs/common/` is absent from that volume.
+
+**Fix:**
+
+```bash
+# Need MinIO client on the host
+command -v mc || echo "install mc first"
+
+make deploy
+# wait ~30s for sidecar, then check DAGs in UI
+
+# Dev workaround (no sidecar): bind-mount ./dags
+make down
+make up-dev
+# or: FEN_DAG_SOURCE=local make up
+```
+
+See also [USER_SETUP.md](USER_SETUP.md) §2 and [PIPELINE_BUILD_DEPLOY_RUN.md](PIPELINE_BUILD_DEPLOY_RUN.md) (`FEN_DAG_SOURCE`).
+
+### Chrome `cannot create default profile directory`
+
+Selenium runs as `seluser` (uid `1200`). If `/data/chrome-profile` is owned by root (common after first volume create), login/crawl fails. Fix:
+
+```bash
+docker exec -u root fen-exam-selenium-chrome-1 \
+  sh -c 'chown -R 1200:1201 /data/chrome-profile'
+```
+
+Then re-run `make fb-login-manual`.
+
+## 7. Next steps
 
 1. Airflow UI → **unpause** **`fen_e2e_pipeline`** (recommended for new users: **one batch**, no catch-bottom).
 2. Trigger with Configuration JSON — see [USER_SETUP.md](USER_SETUP.md) / README.
