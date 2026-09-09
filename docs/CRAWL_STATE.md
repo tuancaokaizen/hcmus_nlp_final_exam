@@ -9,12 +9,26 @@ Exam repo stores crawl checkpoints under `facebook/{group_id}/crawl/`.
 | `crawl/checkpoint.json` | Cursor, batch seq, `should_continue` |
 | `crawl/discover/seen_post_ids.json` | Dedup post IDs |
 | `crawl/discover/batches/` | Discover batch JSONL |
+| `crawl/seed/batches/` | Audit copy of JSONL-ingest batches (`source=jsonl`) |
 | `crawl/enrich/` | Enriched posts + calligraphy gate results |
 | `crawl/download/log.jsonl` | Download audit log |
 | `crawl/state/cookies.json` | FB session (after `make fb-login`) |
 | `images/{post_id}/` | Downloaded image bytes (group root) |
 | `export/valid_post.jsonl` | Posts passing gate (group level) |
 | `ocr/` | OCR JSONL output (group level) |
+
+## JSONL seed ingest (`source=jsonl`)
+
+Host path: **`seeds/input.jsonl`** — rename your seed to this name under `seeds/` (no path param). Mounted as `/opt/fen-exam/seeds`.
+
+Job `fen_jsonl_ingest`:
+
+1. Decode `post_id` (plain digits or base64 `…VK:{id}`).
+2. Probe each CDN URL.
+3. **Live** → discover row with images (`source=jsonl_cdn`) → enrich calligraphy (bytes → Gemini → keep? → MinIO).
+4. **Expired** → incomplete (`cdn_expired`) → Selenium enrich via permalink → new CDN → same gate → download if keep.
+
+Sets `checkpoint.should_continue=false` (no catch-bottom rollover for seed runs).
 
 ## Calligraphy gate vs OCR
 

@@ -33,3 +33,7 @@ reviewer_test/.env
 reviewer_test/.venv/
 reviewer_test/**/__pycache__/
 reviewer_test/**/*.log
+
+# User seed JSONL (keep example + README tracked) /
+# JSONL seed của user (giữ example + README)
+seeds/input.jsonl

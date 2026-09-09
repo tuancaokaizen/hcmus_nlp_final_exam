@@ -329,6 +329,7 @@ flowchart LR
 | Stage | `FEN_JOB` | API / service | Input → Output |
 |-------|-----------|---------------|----------------|
 | Discover | `fen_crawl_discover` | — | FB group → post IDs |
+| JSONL ingest | `fen_jsonl_ingest` | — | `seeds/input.jsonl` → discover batch (CDN probe) |
 | Enrich | `fen_crawl_enrich` | `[fen_calligraphy]` | Post → valid/invalid jsonl |
 | Download | `fen_crawl_download` | — | Valid → images on MinIO |
 | **Label dual** | **`fen_label_dual`** | `[fen_label_*]` + Paddle | Images → `task_b2.jsonl` / xlsx |

@@ -67,6 +67,13 @@ def build_fen_job_task(
                 type="bind",
                 read_only=True,
             ),
+            # Seed JSONL input (Phase C) / Input JSONL seed (Phase C)
+            Mount(
+                source=f"{settings['project_dir']}/seeds",
+                target="/opt/fen-exam/seeds",
+                type="bind",
+                read_only=True,
+            ),
             # Persist pure B2 submit files on host / Giữ file nộp B2 thuần trên host
             Mount(
                 source=f"{settings['project_dir']}/output",

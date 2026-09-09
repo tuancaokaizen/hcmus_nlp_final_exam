@@ -56,11 +56,30 @@ discover → enrich (calligraphy gate) → download → label dual (OCR B2)
 | Step | Meaning |
 |------|---------|
 | **Discover** | Scroll FB group, take ~`batch_target` **unseen** posts |
+| **JSONL ingest** (`source=jsonl`) | Read `seeds/input.jsonl` → probe CDN → live=gate/download, expired=Selenium enrich |
 | **Enrich** | Enough caption + image? Handwritten calligraphy? → `valid` / `invalid` |
 | **Download** | Upload **valid** post images to MinIO |
 | **Label dual** | OCR each image: Gemini ∥ Paddle → fuse → GLM → B2 submit files |
 
 **Auto-skip:** already-`seen` posts are not crawled again; images that already have an OCR page are not re-OCR’d (unless `force: true`).
+
+### JSONL seed (no GraphQL)
+
+```bash
+cp your_posts.jsonl seeds/input.jsonl
+```
+
+```json
+{
+  "group_id": "322453387859386",
+  "source": "jsonl",
+  "batch_target": 10,
+  "ocr_limit": 3,
+  "jsonl_skip_seen": false
+}
+```
+
+See [`seeds/README.md`](seeds/README.md).
 
 ---
 
@@ -72,7 +91,7 @@ It does **not** catch-bottom / rollover — treat it as **one manual batch**.
 | DAG | When to use | One batch? | Catch-bottom? |
 |-----|-------------|------------|---------------|
 | **`fen_e2e_pipeline`** | **New users / grading smoke** — full path in one go | Yes (`batch_target`) | **No** (no `catch_bottom`) |
-| **`fen_crawl_pipeline`** | Long crawl / many batches | Each run = 1 batch | **Yes** — default `catch_bottom: true` (rollover) |
+| **`fen_crawl_pipeline`** | Long crawl / many batches (also supports `source=jsonl`) | Each run = 1 batch | **Yes** — default `catch_bottom: true` (rollover; **off** for jsonl) |
 | **`fen_label_dual_pipeline`** | Images already on MinIO; OCR only | — | — |
 | `fen_ocr_pipeline` | Legacy — **do not** use for new B2 | — | — |
 

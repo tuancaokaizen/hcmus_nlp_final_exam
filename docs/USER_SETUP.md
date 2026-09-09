@@ -175,6 +175,27 @@ No `batch_size` — use **`batch_target`**.
 - OCR uses the full internal quote queue (`batch_seq=0`); no need to pass `batch_seq`.
 - `prepare_queues` compares images to `valid_post`: **new images → auto-rebuild** `quote_01..12` (no skip for stale queues). Already-OCR’d images still skip via page sidecars.
 
+### `fen_e2e_pipeline` — JSONL seed (Phase C)
+
+```bash
+cp your_posts.jsonl seeds/input.jsonl
+```
+
+```json
+{
+  "group_id": "322453387859386",
+  "source": "jsonl",
+  "batch_target": 10,
+  "ocr_limit": 3,
+  "flush_posts": 5,
+  "jsonl_skip_seen": false
+}
+```
+
+- No GraphQL discover — reads `seeds/input.jsonl`.
+- Live CDN → calligraphy gate → download; expired → Selenium enrich → same gate.
+- See [`seeds/README.md`](../seeds/README.md).
+
 ### `fen_crawl_pipeline` — crawl + (optional) catch-bottom
 
 ```json
@@ -190,6 +211,7 @@ No `batch_size` — use **`batch_target`**.
 
 - **`catch_bottom: false`** — same spirit as e2e for crawl count: **one** batch then stop.
 - **`catch_bottom: true`** (default) — after each batch, cooldown then **re-trigger** crawl until `bottom_year` (2013) or feed end → **long**.
+- **`source: jsonl`** — one-shot seed ingest; rollover is forced off.
 - After download → auto-triggers **`fen_label_dual_pipeline`**.
 - `demo_mode: true` (legacy) = `catch_bottom: false`.
 

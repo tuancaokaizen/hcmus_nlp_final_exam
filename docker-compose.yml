@@ -178,6 +178,7 @@ services:
     extra_hosts: *ramclouds-hosts
     volumes:
       - ./dags:/opt/fen-exam/dags:ro
+      - ./seeds:/opt/fen-exam/seeds:ro
       - ./output:/tmp/fen-output
     depends_on:
       - minio

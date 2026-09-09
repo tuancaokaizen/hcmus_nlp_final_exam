@@ -22,6 +22,7 @@ DEFAULT_ARGS = {
 }
 
 DEFAULT_GROUP_ID = "322453387859386"
+DEFAULT_JSONL_PATH = "/opt/fen-exam/seeds/input.jsonl"
 
 
 def _param_expr(name: str) -> str:
@@ -54,6 +55,24 @@ def _resolve_group_id(**context) -> str:
     return str(conf.get("group_id") or params.get("group_id") or DEFAULT_GROUP_ID)
 
 
+def _resolve_source(**context) -> str:
+    """Normalize ingest source: crawl | jsonl / Chuẩn hóa nguồn: crawl | jsonl."""
+    dag_run = context.get("dag_run")
+    conf = (dag_run.conf if dag_run else None) or {}
+    params = context.get("params") or {}
+    raw = str(conf.get("source") or params.get("source") or "crawl").strip().lower()
+    if raw in {"jsonl", "seed", "file"}:
+        return "jsonl"
+    return "crawl"
+
+
+def _choose_source(**context) -> str:
+    """Branch: JSONL seed vs Facebook crawl / Nhánh: seed JSONL vs crawl FB."""
+    source = _resolve_source(**context)
+    print(f"[fen_e2e] ingest_source={source}", flush=True)
+    return "jsonl_ingest" if source == "jsonl" else "branch_fb_login"
+
+
 def _choose_fb_login(**context) -> str:
     dag_run = context.get("dag_run")
     conf = (dag_run.conf if dag_run else None) or {}
@@ -84,13 +103,23 @@ def _resolve_ocr_batch(**context) -> int:
 with DAG(
     dag_id="fen_e2e_pipeline",
     default_args=DEFAULT_ARGS,
-    description="E2E: optional fb-login → crawl batch → label dual (fuse_gt)",
+    description="E2E: crawl|jsonl seed → enrich → download → label dual (fuse_gt)",
     schedule_interval=None,
     catchup=False,
     max_active_runs=1,
     tags=["fen-exam", "e2e", "docker"],
     params={
         "group_id": Param(default=DEFAULT_GROUP_ID, type="string"),
+        "source": Param(
+            default="crawl",
+            type="string",
+            description="crawl = GraphQL discover; jsonl = seeds/input.jsonl",
+        ),
+        "jsonl_path": Param(
+            default=DEFAULT_JSONL_PATH,
+            type="string",
+            description="Container path to seed JSONL (source=jsonl)",
+        ),
         "batch_target": Param(default=10, type="integer"),
         "ocr_limit": Param(
             default=0,
@@ -111,6 +140,11 @@ with DAG(
         ),
         "reset_crawl_data": Param(default=False, type="boolean"),
         "run_fb_login": Param(default=False, type="boolean"),
+        "jsonl_skip_seen": Param(
+            default=True,
+            type="boolean",
+            description="When source=jsonl, skip post_ids already in seen set",
+        ),
     },
 ) as dag:
     base_env = {
@@ -125,6 +159,24 @@ with DAG(
         "FEN_MINIO_ENDPOINT": "http://minio:9000",
         "SELENIUM_REMOTE_URL": "http://selenium-chrome:4444/wd/hub",
     }
+
+    branch_source = BranchPythonOperator(
+        task_id="branch_source",
+        python_callable=_choose_source,
+    )
+
+    jsonl_ingest = build_fen_job_task(
+        task_id="jsonl_ingest",
+        job_name="fen_jsonl_ingest",
+        execution_timeout=timedelta(minutes=30),
+        env_vars={
+            **base_env,
+            "FEN_JSONL_PATH": _param_expr("jsonl_path"),
+            "FEN_JSONL_LIMIT": _param_expr("batch_target"),
+            "FEN_JSONL_SKIP_SEEN": _bool_expr("jsonl_skip_seen"),
+            "FEN_JSONL_ENCODING": "auto",
+        },
+    )
 
     branch_fb_login = BranchPythonOperator(
         task_id="branch_fb_login",
@@ -156,6 +208,9 @@ with DAG(
         job_name="fen_crawl_enrich",
         execution_timeout=timedelta(hours=2),
         env_vars=base_env,
+        # Either jsonl_ingest or crawl_discover feeds enrich /
+        # jsonl_ingest hoặc crawl_discover đều nối vào enrich
+        trigger_rule="none_failed_min_one_success",
     )
     download = build_fen_job_task(
         task_id="crawl_download",
@@ -197,6 +252,9 @@ with DAG(
         },
     )
 
+    branch_source >> [jsonl_ingest, branch_fb_login]
+    jsonl_ingest >> enrich
     branch_fb_login >> [fb_login, discover]
     fb_login >> discover
-    discover >> enrich >> download >> resolve_ocr_batch >> label_dual
+    discover >> enrich
+    enrich >> download >> resolve_ocr_batch >> label_dual

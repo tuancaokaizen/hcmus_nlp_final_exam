@@ -7,7 +7,11 @@ from datetime import datetime, timedelta
 
 from airflow import DAG  # noqa: F401
 from airflow.models.param import Param  # type: ignore
-from airflow.operators.python import PythonOperator, ShortCircuitOperator  # type: ignore
+from airflow.operators.python import (  # type: ignore
+    BranchPythonOperator,
+    PythonOperator,
+    ShortCircuitOperator,
+)
 
 _JOBS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "jobs"))
 if _JOBS_DIR not in sys.path:
@@ -26,6 +30,7 @@ DEFAULT_ARGS = {
 DEFAULT_GROUP_ID = "322453387859386"
 DEFAULT_BATCH_TARGET = 10
 DEFAULT_ROLLOVER_COOLDOWN_SEC = 180
+DEFAULT_JSONL_PATH = "/opt/fen-exam/seeds/input.jsonl"
 
 
 def _param_expr(name: str) -> str:
@@ -65,11 +70,30 @@ def _truthy(value: object) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _resolve_source(context) -> str:
+    """Normalize ingest source: crawl | jsonl / Chuẩn hóa nguồn: crawl | jsonl."""
+    raw = str(_resolve_param(context, "source", "crawl") or "crawl").strip().lower()
+    if raw in {"jsonl", "seed", "file"}:
+        return "jsonl"
+    return "crawl"
+
+
+def _choose_source(**context) -> str:
+    """Branch crawl discover vs JSONL seed / Nhánh crawl discover vs seed JSONL."""
+    source = _resolve_source(context)
+    print(f"[fen_crawl] ingest_source={source}", flush=True)
+    return "run_jsonl_ingest" if source == "jsonl" else "run_crawl_discover"
+
+
 def _should_continue_crawl(**context) -> bool:
     from final_exam_nlp_crawl_runner import read_should_continue
 
     params = context.get("params") or {}
     conf = (context.get("dag_run").conf if context.get("dag_run") else None) or {}
+    # JSONL seed is one-shot — never rollover / Seed JSONL one-shot — không rollover
+    if _resolve_source(context) == "jsonl":
+        print("[fen_crawl] source=jsonl → no rollover", flush=True)
+        return False
     # Legacy alias: demo_mode=true == catch_bottom=false / Alias cũ
     if _truthy(conf.get("demo_mode") or params.get("demo_mode")):
         print("[fen_crawl] demo_mode=true (deprecated) → single batch only", flush=True)
@@ -153,13 +177,28 @@ def _cooldown_and_trigger_next(**context) -> str:
 with DAG(
     dag_id="fen_crawl_pipeline",
     default_args=DEFAULT_ARGS,
-    description="Crawl: Discover → Enrich → Download → trigger label dual → optional rollover",
+    description="Crawl|JSONL: Discover/ingest → Enrich → Download → trigger label dual → optional rollover",
     schedule_interval=None,
     catchup=False,
     max_active_runs=1,
     tags=["fen-exam", "crawl", "docker"],
     params={
         "group_id": Param(default=DEFAULT_GROUP_ID, type="string"),
+        "source": Param(
+            default="crawl",
+            type="string",
+            description="crawl = GraphQL discover; jsonl = seeds/input.jsonl",
+        ),
+        "jsonl_path": Param(
+            default=DEFAULT_JSONL_PATH,
+            type="string",
+            description="Container path to seed JSONL (source=jsonl)",
+        ),
+        "jsonl_skip_seen": Param(
+            default=True,
+            type="boolean",
+            description="When source=jsonl, skip post_ids already in seen set",
+        ),
         "crawl_mode": Param(default="split", type="string"),
         "batch_target": Param(default=DEFAULT_BATCH_TARGET, type="integer", minimum=1),
         "catch_bottom": Param(
@@ -213,6 +252,22 @@ with DAG(
         "SELENIUM_REMOTE_URL": "http://selenium-chrome:4444/wd/hub",
     }
 
+    branch_source = BranchPythonOperator(
+        task_id="branch_source",
+        python_callable=_choose_source,
+    )
+    jsonl_ingest = build_fen_job_task(
+        task_id="run_jsonl_ingest",
+        job_name="fen_jsonl_ingest",
+        execution_timeout=timedelta(minutes=30),
+        env_vars={
+            **fen_env,
+            "FEN_JSONL_PATH": _param_expr("jsonl_path"),
+            "FEN_JSONL_LIMIT": _param_expr("batch_target"),
+            "FEN_JSONL_SKIP_SEEN": _bool_expr("jsonl_skip_seen"),
+            "FEN_JSONL_ENCODING": "auto",
+        },
+    )
     discover = build_fen_job_task(
         task_id="run_crawl_discover",
         job_name="fen_crawl_discover",
@@ -224,6 +279,7 @@ with DAG(
         job_name="fen_crawl_enrich",
         execution_timeout=timedelta(hours=4),
         env_vars=fen_env,
+        trigger_rule="none_failed_min_one_success",
     )
     download = build_fen_job_task(
         task_id="run_crawl_download",
@@ -241,6 +297,9 @@ with DAG(
         task_id="cooldown_and_trigger_next", python_callable=_cooldown_and_trigger_next
     )
 
-    discover >> enrich >> download
+    branch_source >> [jsonl_ingest, discover]
+    jsonl_ingest >> enrich
+    discover >> enrich
+    enrich >> download
     download >> trigger_label_dual
     download >> should_continue >> trigger_next

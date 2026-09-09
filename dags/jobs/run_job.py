@@ -440,6 +440,27 @@ def _run_fen_crawl_discover() -> None:
     print(f"[fen_crawl_discover] done {result}")
 
 
+def _run_fen_jsonl_ingest() -> None:
+    """Ingest seeds/input.jsonl → discover batch / Ingest JSONL seed → batch discover."""
+    from fen_jsonl_ingest import run_jsonl_ingest
+
+    group_id = os.environ.get("FEN_GROUP_ID", "").strip()
+    jsonl_path = os.environ.get("FEN_JSONL_PATH", "").strip() or None
+    limit = int(os.environ.get("FEN_JSONL_LIMIT", "0").strip() or "0")
+    encoding = os.environ.get("FEN_JSONL_ENCODING", "auto").strip() or "auto"
+    skip_seen = _as_bool(os.environ.get("FEN_JSONL_SKIP_SEEN"), default=True)
+    run_id = os.environ.get("FEN_RUN_ID", "").strip() or None
+    result = run_jsonl_ingest(
+        group_id=group_id,
+        jsonl_path=jsonl_path,
+        limit=limit,
+        encoding=encoding,
+        skip_seen=skip_seen,
+        run_id=run_id,
+    )
+    print(f"[fen_jsonl_ingest] done {result}")
+
+
 def _run_fen_crawl_enrich() -> None:
     from fen_crawl_common import DEFAULT_SOFT_RESTART_EVERY
     from fen_crawl_enrich import run_enrich_batch, run_enrich_one_permalink
@@ -1044,6 +1065,9 @@ def main() -> None:
     if job == "fen_crawl_discover":
         _run_fen_crawl_discover()
         return
+    if job == "fen_jsonl_ingest":
+        _run_fen_jsonl_ingest()
+        return
     if job == "fen_crawl_enrich":
         _run_fen_crawl_enrich()
         return
@@ -1107,7 +1131,7 @@ def main() -> None:
         "compare_ocr_corpus, final_exam_nlp_crawl, "
         "final_exam_nlp_media_batch, final_exam_nlp_caption_match, "
         "final_exam_nlp_gallery_walk, final_exam_nlp_graphql_batch, "
-        "fen_crawl_discover, fen_crawl_enrich, fen_crawl_download, "
+        "fen_crawl_discover, fen_jsonl_ingest, fen_crawl_enrich, fen_crawl_download, "
         "final_exam_nlp_seed2_discover, final_exam_nlp_seed2_dump_ingest, "
         "final_exam_nlp_cdn_refetch, "
         "final_exam_nlp_invalid_recheck, final_exam_nlp_bootstrap_login, "
