@@ -25,6 +25,8 @@ Trigger:
 
 Container path: `/opt/fen-exam/seeds/input.jsonl` (compose mounts `./seeds`).
 
+DAG default **`jsonl_skip_seen=true`** — the example sets `false` so re-testing the same seed re-selects rows. Seen IDs are shared with crawl (`crawl/discover/seen_post_ids.json`).
+
 ## Files
 
 | File | Tracked? | Purpose |

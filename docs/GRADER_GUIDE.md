@@ -21,10 +21,10 @@ Label dual artifact details: **[LABEL_DUAL_OUTPUT.md](LABEL_DUAL_OUTPUT.md)**.
 ## 2. Config
 
 - `dags/config.ini` exists after `make configure`.
-- Keys are **stage-separated** (do not share one key):
+- Keys use **separate env slots per stage** (calligraphy, label Gemini/GPT/GLM, optional legacy OCR). For local demo you may paste the **same** Ramcloud value into each slot — still fill every required variable:
   - `[fen_calligraphy]` — enrich
   - `[fen_label_gemini]`, `[fen_label_gpt]`, `[fen_label_glm]` — label dual
-  - `[fen_ocr]` — legacy OCR only
+  - `[fen_ocr]` — legacy OCR only (optional)
 
 ---
 

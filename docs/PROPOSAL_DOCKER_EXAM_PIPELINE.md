@@ -1,11 +1,14 @@
 # Proposal: NLP Final Exam Pipeline — Docker Compose
 
-> **Current operations:** [`README.md`](../README.md), [`USER_SETUP.md`](USER_SETUP.md), [`LABEL_DUAL_OUTPUT.md`](LABEL_DUAL_OUTPUT.md), [`PIPELINE_BUILD_DEPLOY_RUN.md`](PIPELINE_BUILD_DEPLOY_RUN.md) — primary flow is **label dual** (`task_b2.jsonl`, `flush_posts=5`). This file is the original design proposal.
+> **HISTORICAL DESIGN DOC — do not run commands in this file as a how-to.**  
+> **Current operations:** [`README.md`](../README.md), [`USER_SETUP.md`](USER_SETUP.md), [`LABEL_DUAL_OUTPUT.md`](LABEL_DUAL_OUTPUT.md), [`PIPELINE_BUILD_DEPLOY_RUN.md`](PIPELINE_BUILD_DEPLOY_RUN.md), [`CRAWL_STATE.md`](CRAWL_STATE.md).  
+> Primary submit path is **label dual** (`ocr/label_dual_pilot/task_b2.jsonl`, `flush_posts=5`).  
+> Section “Quick demo” / `make load-sample` / `make trigger-demo` below are **obsolete** (those Make targets do not exist).
 
-> **Purpose:** Propose the architecture of repo `implement_nlp_pipeline_for_exam` for **thesis graders**.  
+> **Purpose (archive):** Original architecture proposal for repo `implement_nlp_pipeline_for_exam` for **thesis graders**.  
 > Deploy in **one mode only: Docker Compose** (Airflow + MinIO + Paddle + Selenium).
 
-**Version:** `v0.2-proposal`  
+**Version:** `v0.2-proposal` (archived)  
 **Date:** 2026-08-31  
 **Repo:** `features/implement_nlp_pipeline_for_exam`
 
@@ -224,16 +227,9 @@ AIRFLOW_UID=50000
 
 ## 6. Grading workflow
 
-### Quick demo (~15 minutes, no API key / FB required)
+### Obsolete quick demo (do not run)
 
-```bash
-git clone ... && cd implement_nlp_pipeline_for_exam
-cp .env.example .env
-make up-minimal
-make load-sample
-make trigger-demo
-make verify
-```
+The old targets `make up-minimal` / `make load-sample` / `make trigger-demo` are **not** in the current Makefile. Use the live path below (or [USER_SETUP.md](USER_SETUP.md)).
 
 ### Full pipeline (with API keys + FB cookies)
 
@@ -242,9 +238,9 @@ git clone https://github.com/tuancaokaizen/hcmus_nlp_final_exam.git
 cd hcmus_nlp_final_exam
 git checkout main
 cp .env.example .env
-make configure && make up && make fb-login
-# Airflow UI http://localhost:8080 — unpause DAG → trigger
-# See README.md for trigger JSON (batch_target, ocr_limit, flush_posts)
+make configure && make up && make fb-login-manual
+# Airflow UI http://localhost:8080 — unpause fen_e2e_pipeline → trigger
+# See README.md / USER_SETUP.md for trigger JSON (batch_target, ocr_limit, flush_posts)
 make verify
 ```
 
@@ -273,13 +269,15 @@ make verify
 
 ---
 
-## 9. Done criteria
+## 9. Done criteria (archive — verify against live docs)
 
-1. `docker compose up -d` → Airflow :8080, MinIO :9001, Paddle `/health` OK  
-2. `make load-sample && make trigger-demo` → `task_b2.jsonl` on MinIO  
-3. B2 has columns: `image, caption, ground_truth, side_matter, gemini, post_link`  
+1. `make up` → Airflow :8080, MinIO :9001, Paddle healthy  
+2. `make fb-login-manual` + trigger **`fen_e2e_pipeline`** → `ocr/label_dual_pilot/task_b2.jsonl` on MinIO  
+3. B2 submit columns per [LABEL_DUAL_OUTPUT.md](LABEL_DUAL_OUTPUT.md) (includes `fuse_gt` when GLM on)  
 4. `make verify` passes  
-5. `GRADER_GUIDE.md` ≤ 10 steps, Docker Desktop only  
+5. [GRADER_GUIDE.md](GRADER_GUIDE.md) + [USER_SETUP.md](USER_SETUP.md) — Docker Desktop only  
+
+(Obsolete checklist items such as `make load-sample` / `make trigger-demo` are removed.)
 
 ---
 

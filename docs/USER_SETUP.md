@@ -54,7 +54,7 @@ discover → enrich → download → (label dual)
 
 1. Install **Docker** + Compose v2 + (recommended) [`mc`](https://min.io/docs/minio/linux/reference/minio-client/minio-mc.html)
 2. Clone **`main`** → `cp .env.example .env` → `make configure`
-3. Open `.env`, fill **`FEN_LABEL_GEMINI_API_KEY`**, **`FEN_LABEL_GPT_API_KEY`**, **`FEN_LABEL_GLM_API_KEY`** (wizard only asks calligraphy + OCR — copying the same Ramcloud key is fine)
+3. Open `.env`, fill **`FEN_LABEL_GEMINI_API_KEY`**, **`FEN_LABEL_GPT_API_KEY`**, **`FEN_LABEL_GLM_API_KEY`** (wizard only asks calligraphy + OCR). Each stage has its **own env slot**; for a local demo you may paste the **same** Ramcloud value into every slot — still fill each variable.
 4. `make config` → `make up` (first build may take 10–20 minutes)
 5. `make fb-login-manual` → terminal prints **http://localhost:7900** (pass `secret`). With `FB_USERNAME`/`FB_PASSWORD` in `.env`, fields auto-fill; you only do **2FA** on noVNC.
 6. Airflow http://localhost:8080 (`admin`/`admin`) → **unpause** `fen_e2e_pipeline` → **Trigger**
@@ -162,8 +162,21 @@ make verify
 | **`catch_bottom`** | **`fen_crawl_pipeline` only** | bool | `true` |
 | **`reset_crawl_data`** | Crawl | clear crawl state, keep cookies | `false` |
 | **`force`** | Label dual | re-OCR finished images | `false` |
+| **`jsonl_skip_seen`** | JSONL ingest | skip `post_id` already in seen | **`true`** (smoke examples often set `false`) |
+| **`source`** | e2e / crawl | `crawl` (default) or `jsonl` | `crawl` |
 
 No `batch_size` — use **`batch_target`**.
+
+### Skip & source map (do not confuse with `batch_target`)
+
+| Stage | What is skipped | Counts toward `batch_target`? | Override |
+|-------|-----------------|-------------------------------|----------|
+| Discover (crawl) | `post_id` already in `seen_post_ids.json` | **No** — only **new** posts fill the batch | `reset_crawl_data: true` clears seen |
+| JSONL ingest | Same seen set when `jsonl_skip_seen=true` | **No** | `"jsonl_skip_seen": false` |
+| Label dual OCR | Image already has page under `label_dual_pilot/pages/` | N/A (`ocr_limit` = images) | `"force": true` |
+| Source | `crawl` = GraphQL discover; `jsonl` = `seeds/input.jsonl` | Same `batch_target` = max **new** rows | `"source": "jsonl"` |
+
+Chrome restore bubble blocking scroll: [LOCAL_SETUP_LOG.md](LOCAL_SETUP_LOG.md) §6.
 
 ### `fen_e2e_pipeline` — one batch, no catch-bottom
 
@@ -202,6 +215,7 @@ cp your_posts.jsonl seeds/input.jsonl
 
 - No GraphQL discover — reads `seeds/input.jsonl`.
 - Live CDN → calligraphy gate → download; expired → Selenium enrich → same gate.
+- Default **`jsonl_skip_seen=true`** — example above sets `false` so you can re-ingest the same seed while testing.
 - See [`seeds/README.md`](../seeds/README.md).
 
 ### `fen_crawl_pipeline` — crawl + (optional) catch-bottom

@@ -10,7 +10,7 @@ HCMUS NLP exam pipeline / demo: **crawl Facebook → calligraphy filter → down
 2. Clone **`main`**, create `.env`, start the stack, log in to Facebook.
 3. In Airflow: unpause **`fen_e2e_pipeline`** → Trigger (one small batch, no catch-bottom).
 
-Details: **[docs/USER_SETUP.md](docs/USER_SETUP.md)** · Troubleshooting / noVNC: **[docs/LOCAL_SETUP_LOG.md](docs/LOCAL_SETUP_LOG.md)**.
+Details: **[docs/USER_SETUP.md](docs/USER_SETUP.md)** · Troubleshooting / noVNC / Chrome restore bubble: **[docs/LOCAL_SETUP_LOG.md](docs/LOCAL_SETUP_LOG.md)** · Crawl state & skip: **[docs/CRAWL_STATE.md](docs/CRAWL_STATE.md)**.
 
 ### Quick start
 
@@ -20,7 +20,7 @@ cd hcmus_nlp_final_exam
 git checkout main && git pull
 cp .env.example .env
 make configure          # FB (optional) + calligraphy/OCR key
-# Open .env: fill FEN_LABEL_GEMINI/GPT/GLM(_DEEPSEEK)_API_KEY (same Ramcloud key is fine)
+# Open .env: fill each FEN_LABEL_*_API_KEY slot (same Ramcloud value OK for local demo)
 make up                 # first build may take 10–20 minutes
 make fb-login-manual    # http://localhost:7900 (pass: secret); .env user/pass auto-fill → you only do 2FA
 ```
@@ -61,7 +61,7 @@ discover → enrich (calligraphy gate) → download → label dual (OCR B2)
 | **Download** | Upload **valid** post images to MinIO |
 | **Label dual** | OCR each image: Gemini ∥ Paddle → fuse → GLM → B2 submit files |
 
-**Auto-skip:** already-`seen` posts are not crawled again; images that already have an OCR page are not re-OCR’d (unless `force: true`).
+**Auto-skip:** already-`seen` posts are not crawled again (do not count toward `batch_target`); JSONL uses the same seen set when `jsonl_skip_seen=true` (default); images that already have an OCR page are not re-OCR’d (unless `force: true`). Skip map: [USER_SETUP.md](docs/USER_SETUP.md) §4.
 
 ### JSONL seed (no GraphQL)
 

@@ -173,6 +173,9 @@ services:
       - ./dags:/opt/fen-exam/dags:ro
       - ./seeds:/opt/fen-exam/seeds:ro
       - ./output:/tmp/fen-output
+      # Share Chrome profile with selenium (crash-bubble prefs patch) /
+      # Chia sẻ profile Chrome với selenium (patch prefs hết bubble crash)
+      - selenium-profile:/data/chrome-profile
     depends_on:
       - minio
       - paddle-ocr

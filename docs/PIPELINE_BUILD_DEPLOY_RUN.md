@@ -429,14 +429,16 @@ make verify
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `FEN_BATCH_TARGET` | `10` | Target posts per crawl batch |
-| `FEN_OCR_LIMIT` | `0` | Cap OCR posts when running jobs via env; `0` = entire queue (matches DAG default) |
-| `FEN_CATCH_BOTTOM` | `true` | Hint in `.env`; DAG param `catch_bottom` on `fen_crawl_pipeline` |
+| `FEN_BATCH_TARGET` | `10` | Target **new** posts per crawl / JSONL batch |
+| `FEN_OCR_LIMIT` | `0` | Cap label-dual **images** when running via env; `0` = entire queue (matches DAG default) |
+| `FEN_CATCH_BOTTOM` | `true` | Hint in `.env`; DAG param `catch_bottom` on `fen_crawl_pipeline` only |
 | `FEN_DEMO_MODE` | `false` | Deprecated — use `catch_bottom=false` |
 
-**OCR skip:** images already present in `ocr_result.jsonl` are skipped (unless `force=true`). `ocr_limit` limits the number of **posts** in the queue, not the number of images.
+**Label dual skip:** images that already have a page under `ocr/label_dual_pilot/pages/` are skipped unless `force=true`. DAG param **`ocr_limit` / `label_limit`** = max pending **images** (`0` = no cap). See [LABEL_DUAL_OUTPUT.md](LABEL_DUAL_OUTPUT.md) and [CRAWL_STATE.md](CRAWL_STATE.md).
 
-**Qdrant:** not used in the exam stack — OCR/retry write only to MinIO.
+Legacy `fen_ocr_pipeline` / `ocr/ocr_result.jsonl` is optional only — not the B2 path.
+
+**Qdrant:** not used in the exam stack — label dual / OCR write only to MinIO.
 
 ---
 

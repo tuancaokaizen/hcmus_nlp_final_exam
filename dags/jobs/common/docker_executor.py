@@ -77,6 +77,14 @@ def build_fen_job_task(
                 type="bind",
                 read_only=False,
             ),
+            # Same Chrome profile as selenium — clear crash prefs before session /
+            # Cùng profile Chrome với selenium — xóa prefs crash trước session
+            Mount(
+                source=f"{settings['compose_project']}_selenium-profile",
+                target="/data/chrome-profile",
+                type="volume",
+                read_only=False,
+            ),
         ],
         command=[],
         mount_tmp_dir=False,
