@@ -83,6 +83,8 @@ sequenceDiagram
 
 **Note:** `fen-job` (DockerOperator) still mounts `FEN_HOST_PROJECT_DIR/dags` from the host to run jobs + `config.ini` — only Airflow’s **DAG parse** switches to MinIO when `FEN_DAG_SOURCE=minio`.
 
+**Troubleshooting:** `No module named 'common'` usually means the sync volume is missing `jobs/common/` (no `mc` → deploy skipped, or sync not finished). Install `mc`, run `make deploy`, wait ~30s — or use `make up-dev` / `FEN_DAG_SOURCE=local`. Details: [USER_SETUP.md](USER_SETUP.md) §2, [LOCAL_SETUP_LOG.md](LOCAL_SETUP_LOG.md) §6.
+
 After editing DAGs in `minio` mode:
 
 ```bash
@@ -329,6 +331,7 @@ flowchart LR
 | Stage | `FEN_JOB` | API / service | Input → Output |
 |-------|-----------|---------------|----------------|
 | Discover | `fen_crawl_discover` | — | FB group → post IDs |
+| JSONL ingest | `fen_jsonl_ingest` | — | `seeds/input.jsonl` → discover batch (CDN probe) |
 | Enrich | `fen_crawl_enrich` | `[fen_calligraphy]` | Post → valid/invalid jsonl |
 | Download | `fen_crawl_download` | — | Valid → images on MinIO |
 | **Label dual** | **`fen_label_dual`** | `[fen_label_*]` + Paddle | Images → `task_b2.jsonl` / xlsx |
@@ -426,14 +429,16 @@ make verify
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `FEN_BATCH_TARGET` | `10` | Target posts per crawl batch |
-| `FEN_OCR_LIMIT` | `0` | Cap OCR posts when running jobs via env; `0` = entire queue (matches DAG default) |
-| `FEN_CATCH_BOTTOM` | `true` | Hint in `.env`; DAG param `catch_bottom` on `fen_crawl_pipeline` |
+| `FEN_BATCH_TARGET` | `10` | Target **new** posts per crawl / JSONL batch |
+| `FEN_OCR_LIMIT` | `0` | Cap label-dual **images** when running via env; `0` = entire queue (matches DAG default) |
+| `FEN_CATCH_BOTTOM` | `true` | Hint in `.env`; DAG param `catch_bottom` on `fen_crawl_pipeline` only |
 | `FEN_DEMO_MODE` | `false` | Deprecated — use `catch_bottom=false` |
 
-**OCR skip:** images already present in `ocr_result.jsonl` are skipped (unless `force=true`). `ocr_limit` limits the number of **posts** in the queue, not the number of images.
+**Label dual skip:** images that already have a page under `ocr/label_dual_pilot/pages/` are skipped unless `force=true`. DAG param **`ocr_limit` / `label_limit`** = max pending **images** (`0` = no cap). See [LABEL_DUAL_OUTPUT.md](LABEL_DUAL_OUTPUT.md) and [CRAWL_STATE.md](CRAWL_STATE.md).
 
-**Qdrant:** not used in the exam stack — OCR/retry write only to MinIO.
+Legacy `fen_ocr_pipeline` / `ocr/ocr_result.jsonl` is optional only — not the B2 path.
+
+**Qdrant:** not used in the exam stack — label dual / OCR write only to MinIO.
 
 ---
 

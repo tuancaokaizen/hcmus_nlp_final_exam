@@ -17,6 +17,13 @@ report/
 scripts/fetch_k3s_minio_stats.sh
 scripts/fetch-k3s*
 
+# Local scratch / debug dumps — never commit /
+# File tạm / dump debug local — không commit
+.tmp*
+tmp/
+*.tmp
+host_jobs/
+
 # Prefetched Paddle models (large) / Model Paddle tải sẵn
 data/paddlex/
 
@@ -33,3 +40,7 @@ reviewer_test/.env
 reviewer_test/.venv/
 reviewer_test/**/__pycache__/
 reviewer_test/**/*.log
+
+# User seed JSONL (keep example + README tracked) /
+# JSONL seed của user (giữ example + README)
+seeds/input.jsonl

@@ -693,7 +693,6 @@ def read_should_continue(group_id: str | None = None) -> bool:
 
 def _clear_chrome_profile_locks(profile_dir: str) -> None:
     """Remove stale singleton locks after pod restart / Xóa lock singleton cũ sau restart pod."""
-    import os
     from pathlib import Path
 
     lock_names = ("SingletonLock", "SingletonCookie", "SingletonSocket", "DevToolsActivePort")
@@ -709,6 +708,83 @@ def _clear_chrome_profile_locks(profile_dir: str) -> None:
                 (root / name).unlink(missing_ok=True)
             except OSError:
                 pass
+
+
+def _mark_chrome_profile_clean_exit(profile_dir: str) -> None:
+    """Clear 'Chrome didn't shut down correctly' so it won't block scroll/noVNC.
+    Xóa cờ crash để hết popup chặn scroll/noVNC.
+    """
+    import json
+    from pathlib import Path
+
+    prefs_path = Path(profile_dir) / "Default" / "Preferences"
+    if not prefs_path.is_file():
+        return
+    try:
+        data = json.loads(prefs_path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(
+            f"[final_exam_nlp_crawl] chrome prefs read skip={type(exc).__name__}",
+            flush=True,
+        )
+        return
+    if not isinstance(data, dict):
+        return
+    # profile.exit_type=Crashed → restore bubble on next start /
+    # profile.exit_type=Crashed → bubble restore lần mở sau
+    profile = data.get("profile")
+    if not isinstance(profile, dict):
+        profile = {}
+        data["profile"] = profile
+    changed = False
+    if profile.get("exit_type") != "Normal":
+        profile["exit_type"] = "Normal"
+        changed = True
+    if profile.get("exited_cleanly") is not True:
+        profile["exited_cleanly"] = True
+        changed = True
+    if not changed:
+        return
+    try:
+        prefs_path.write_text(
+            json.dumps(data, ensure_ascii=False, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        print(
+            "[final_exam_nlp_crawl] chrome profile marked clean exit "
+            "(suppress restore bubble)",
+            flush=True,
+        )
+    except OSError as exc:
+        print(
+            f"[final_exam_nlp_crawl] chrome prefs write skip={type(exc).__name__}",
+            flush=True,
+        )
+
+
+def _prepare_chrome_profile(profile_dir: str) -> None:
+    """Locks + clean-exit prefs before attaching --user-data-dir.
+    Xóa lock + prefs exit sạch trước khi gắn --user-data-dir.
+    """
+    _clear_chrome_profile_locks(profile_dir)
+    _mark_chrome_profile_clean_exit(profile_dir)
+
+
+def _dismiss_chrome_restore_bubble(driver) -> None:
+    """Best-effort Escape if restore bubble still visible after start.
+    Escape best-effort nếu bubble restore vẫn hiện sau khi start.
+    """
+    try:
+        from selenium.webdriver.common.keys import Keys
+
+        driver.switch_to.active_element.send_keys(Keys.ESCAPE)
+    except Exception:
+        try:
+            from selenium.webdriver.common.keys import Keys
+
+            driver.find_element("tag name", "body").send_keys(Keys.ESCAPE)
+        except Exception:
+            pass
 
 
 def _build_driver(
@@ -738,14 +814,33 @@ def _build_driver(
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
+    # Suppress crash-restore UI that blocks scroll until manually dismissed /
+    # Tắt UI restore sau crash — chặn scroll nếu không tắt tay trên noVNC
+    options.add_argument("--disable-session-crashed-bubble")
+    options.add_argument("--disable-infobars")
+    options.add_argument("--disable-features=InfiniteSessionRestore,TranslateUI")
+    options.add_argument("--no-first-run")
+    options.add_argument("--no-default-browser-check")
     # Cap disk/media caches — selenium pod hard-limited to 4Gi /
     # Giới hạn cache disk/media — pod selenium trần cứng 4Gi
     options.add_argument("--disk-cache-size=1")
     options.add_argument("--media-cache-size=1")
     options.add_argument("--blink-settings=imagesEnabled=true")
     options.add_argument("--js-flags=--max-old-space-size=512")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    options.add_experimental_option("excludeSwitches", ["enable-automation", "enable-logging"])
     options.add_experimental_option("useAutomationExtension", False)
+    # Prefs reinforce clean exit even if Preferences file was not writable /
+    # Prefs củng cố exit sạch khi không ghi được file Preferences
+    try:
+        options.add_experimental_option(
+            "prefs",
+            {
+                "profile.exit_type": "Normal",
+                "profile.exited_cleanly": True,
+            },
+        )
+    except Exception:
+        pass
     # Enable Chrome performance logs for GraphQL capture /
     # Bật performance log Chrome để bắt GraphQL
     if enable_perf_logs:
@@ -767,8 +862,9 @@ def _build_driver(
     # Giữ cookie trong profile Chrome trên volume của selenium
     profile_dir = (os.environ.get("SELENIUM_CHROME_PROFILE_DIR") or "/data/chrome-profile").strip()
     if profile_dir:
-        # Stale locks after selenium rollout block new sessions / Lock cũ sau rollout chặn session mới
-        _clear_chrome_profile_locks(profile_dir)
+        # Need fen-job mount of same volume so prefs patch hits real profile /
+        # Cần fen-job mount cùng volume để patch prefs đúng profile thật
+        _prepare_chrome_profile(profile_dir)
         options.add_argument(f"--user-data-dir={profile_dir}")
         options.add_argument("--profile-directory=Default")
         print(f"[final_exam_nlp_crawl] chrome profile={profile_dir}", flush=True)
@@ -776,6 +872,9 @@ def _build_driver(
     driver = webdriver.Remote(command_executor=remote_url, options=options)
     driver.set_page_load_timeout(page_load_timeout)
     driver.set_script_timeout(60)
+    # Dismiss leftover restore bubble if flags/prefs were ignored /
+    # Đóng bubble restore còn sót nếu flags/prefs bị bỏ qua
+    _dismiss_chrome_restore_bubble(driver)
     return driver
 
 

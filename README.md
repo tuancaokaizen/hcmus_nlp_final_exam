@@ -10,7 +10,7 @@ HCMUS NLP exam pipeline / demo: **crawl Facebook → calligraphy filter → down
 2. Clone **`main`**, create `.env`, start the stack, log in to Facebook.
 3. In Airflow: unpause **`fen_e2e_pipeline`** → Trigger (one small batch, no catch-bottom).
 
-Details: **[docs/USER_SETUP.md](docs/USER_SETUP.md)** · Troubleshooting / noVNC: **[docs/LOCAL_SETUP_LOG.md](docs/LOCAL_SETUP_LOG.md)**.
+Details: **[docs/USER_SETUP.md](docs/USER_SETUP.md)** · Troubleshooting / noVNC / Chrome restore bubble: **[docs/LOCAL_SETUP_LOG.md](docs/LOCAL_SETUP_LOG.md)** · Crawl state & skip: **[docs/CRAWL_STATE.md](docs/CRAWL_STATE.md)**.
 
 ### Quick start
 
@@ -20,7 +20,7 @@ cd hcmus_nlp_final_exam
 git checkout main && git pull
 cp .env.example .env
 make configure          # FB (optional) + calligraphy/OCR key
-# Open .env: fill FEN_LABEL_GEMINI/GPT/GLM(_DEEPSEEK)_API_KEY (same Ramcloud key is fine)
+# Open .env: fill each FEN_LABEL_*_API_KEY slot (same Ramcloud value OK for local demo)
 make up                 # first build may take 10–20 minutes
 make fb-login-manual    # http://localhost:7900 (pass: secret); .env user/pass auto-fill → you only do 2FA
 ```
@@ -56,11 +56,30 @@ discover → enrich (calligraphy gate) → download → label dual (OCR B2)
 | Step | Meaning |
 |------|---------|
 | **Discover** | Scroll FB group, take ~`batch_target` **unseen** posts |
+| **JSONL ingest** (`source=jsonl`) | Read `seeds/input.jsonl` → probe CDN → live=gate/download, expired=Selenium enrich |
 | **Enrich** | Enough caption + image? Handwritten calligraphy? → `valid` / `invalid` |
 | **Download** | Upload **valid** post images to MinIO |
 | **Label dual** | OCR each image: Gemini ∥ Paddle → fuse → GLM → B2 submit files |
 
-**Auto-skip:** already-`seen` posts are not crawled again; images that already have an OCR page are not re-OCR’d (unless `force: true`).
+**Auto-skip:** already-`seen` posts are not crawled again (do not count toward `batch_target`); JSONL uses the same seen set when `jsonl_skip_seen=true` (default); images that already have an OCR page are not re-OCR’d (unless `force: true`). Skip map: [USER_SETUP.md](docs/USER_SETUP.md) §4.
+
+### JSONL seed (no GraphQL)
+
+```bash
+cp your_posts.jsonl seeds/input.jsonl
+```
+
+```json
+{
+  "group_id": "322453387859386",
+  "source": "jsonl",
+  "batch_target": 10,
+  "ocr_limit": 3,
+  "jsonl_skip_seen": false
+}
+```
+
+See [`seeds/README.md`](seeds/README.md).
 
 ---
 
@@ -72,7 +91,7 @@ It does **not** catch-bottom / rollover — treat it as **one manual batch**.
 | DAG | When to use | One batch? | Catch-bottom? |
 |-----|-------------|------------|---------------|
 | **`fen_e2e_pipeline`** | **New users / grading smoke** — full path in one go | Yes (`batch_target`) | **No** (no `catch_bottom`) |
-| **`fen_crawl_pipeline`** | Long crawl / many batches | Each run = 1 batch | **Yes** — default `catch_bottom: true` (rollover) |
+| **`fen_crawl_pipeline`** | Long crawl / many batches (also supports `source=jsonl`) | Each run = 1 batch | **Yes** — default `catch_bottom: true` (rollover; **off** for jsonl) |
 | **`fen_label_dual_pipeline`** | Images already on MinIO; OCR only | — | — |
 | `fen_ocr_pipeline` | Legacy — **do not** use for new B2 | — | — |
 
@@ -189,6 +208,8 @@ Prepare workspace → build images (if missing) → MinIO/Postgres/Airflow/Paddl
 |------|---------|----------------------|
 | Default | `FEN_DAG_SOURCE=minio` | MinIO → sidecar |
 | Fast dev | `make up-dev` | Bind mount `./dags` |
+
+Default mode needs host `mc` + a successful `make deploy`. Otherwise Airflow may raise `No module named 'common'` (empty/incomplete sync volume). Fix: install `mc` → `make deploy` (wait ~30s), or use `make up-dev`. See [USER_SETUP.md](docs/USER_SETUP.md) §2 / [LOCAL_SETUP_LOG.md](docs/LOCAL_SETUP_LOG.md) §6.
 
 ### Make cheat sheet
 

@@ -45,12 +45,9 @@ def build_fen_job_task(
         "FEN_PATHS_OUTPUT_DIR": "/tmp/fen-output",
         **(env_vars or {}),
     }
-    # Pin ramclouds IPv4 — Docker Desktop AAAA-only causes Connection timeout /
-    # Ghim IPv4 ramclouds — Docker Desktop chỉ AAAA hay bị Connection timeout
-    extra_hosts = operator_kwargs.pop(
-        "extra_hosts",
-        {"ramclouds.me": "172.67.144.35"},
-    )
+    # Pure HTTPS to ramclouds.me — no extra_hosts IP pin /
+    # Gọi HTTPS thuần tới ramclouds.me — không ghim IP qua extra_hosts
+    operator_kwargs.pop("extra_hosts", None)
     return DockerOperator(
         task_id=task_id,
         image=settings["image"],
@@ -59,11 +56,17 @@ def build_fen_job_task(
         docker_url="unix://var/run/docker.sock",
         network_mode=f"{settings['compose_project']}_default",
         environment=environment,
-        extra_hosts=extra_hosts,
         mounts=[
             Mount(
                 source=f"{settings['project_dir']}/dags",
                 target="/opt/fen-exam/dags",
+                type="bind",
+                read_only=True,
+            ),
+            # Seed JSONL input (Phase C) / Input JSONL seed (Phase C)
+            Mount(
+                source=f"{settings['project_dir']}/seeds",
+                target="/opt/fen-exam/seeds",
                 type="bind",
                 read_only=True,
             ),
@@ -72,6 +75,14 @@ def build_fen_job_task(
                 source=f"{settings['project_dir']}/output",
                 target="/tmp/fen-output",
                 type="bind",
+                read_only=False,
+            ),
+            # Same Chrome profile as selenium — clear crash prefs before session /
+            # Cùng profile Chrome với selenium — xóa prefs crash trước session
+            Mount(
+                source=f"{settings['compose_project']}_selenium-profile",
+                target="/data/chrome-profile",
+                type="volume",
                 read_only=False,
             ),
         ],

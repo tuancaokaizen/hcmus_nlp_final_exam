@@ -31,7 +31,7 @@ After the wizard, the script also:
 - Sets `FEN_HOST_PROJECT_DIR` = absolute repo path (auto-**quotes** if the path has spaces)
 - Runs `make config` → generates `dags/config.ini`
 
-Remaining keys (`FEN_LABEL_*_API_KEY`, …) if the wizard did not ask: open `.env` and fill by hand (same Ramcloud value is fine if you share one key).
+Remaining keys (`FEN_LABEL_*_API_KEY`, …) if the wizard did not ask: open `.env` and fill each slot (same Ramcloud value is fine for a local demo).
 
 ### Option 2 — copy then edit by hand
 
@@ -141,7 +141,65 @@ If login OK but upload fails with `SignatureDoesNotMatch`: `make config` then re
 - `dags/jobs/run_job.py` — `FEN_MANUAL_LOGIN` / noVNC wait
 - `Makefile` — `fb-login-manual` target
 
-## 6. Next steps
+## 6. Common errors
+
+### `No module named 'common'` (Airflow DAG import)
+
+**Symptom:** Scheduler / UI import error on `fen_*` DAGs; stack mentions `from common.docker_executor import …`.
+
+**Cause:** Default `FEN_DAG_SOURCE=minio` makes Airflow read volume `airflow-dags-cache` (filled by `airflow-dag-sync` from MinIO). If `mc` was missing, deploy was skipped, or sync has not finished, `jobs/common/` is absent from that volume.
+
+**Fix:**
+
+```bash
+# Need MinIO client on the host
+command -v mc || echo "install mc first"
+
+make deploy
+# wait ~30s for sidecar, then check DAGs in UI
+
+# Dev workaround (no sidecar): bind-mount ./dags
+make down
+make up-dev
+# or: FEN_DAG_SOURCE=local make up
+```
+
+See also [USER_SETUP.md](USER_SETUP.md) §2 and [PIPELINE_BUILD_DEPLOY_RUN.md](PIPELINE_BUILD_DEPLOY_RUN.md) (`FEN_DAG_SOURCE`).
+
+### Chrome `cannot create default profile directory`
+
+Selenium runs as `seluser` (uid `1200`). If `/data/chrome-profile` is owned by root (common after first volume create), login/crawl fails. Fix:
+
+```bash
+docker exec -u root fen-exam-selenium-chrome-1 \
+  sh -c 'chown -R 1200:1201 /data/chrome-profile'
+```
+
+Then re-run `make fb-login-manual`.
+
+### Chrome “Restore pages?” / “didn't shut down correctly” (blocks scroll)
+
+**Symptom:** On noVNC (`:7900`) a Chrome restore bubble sits on top of the Facebook feed; discover cannot scroll / GraphQL until you dismiss it by hand.
+
+**Cause:** Crawl reuses a persistent profile (`/data/chrome-profile`). An unclean Chrome quit (timeout, soft-restart, container kill) marks the profile as crashed → restore UI on next start.
+
+**Fix (automatic in current jobs):** before each session the job marks the profile as a clean exit and passes Chrome flags that suppress the crash bubble; Escape is sent as a best-effort dismiss. Prefer a current `./dags` bind (`make up-dev` or deploy that includes `final_exam_nlp_crawl_runner.py`).
+
+**Manual if it still appears:**
+
+1. Open http://localhost:7900 (password `secret`).
+2. Click **Restore** / close the bubble (or press Escape).
+3. Or restart Selenium after fixing ownership:
+
+```bash
+docker exec -u root fen-exam-selenium-chrome-1 \
+  sh -c 'chown -R 1200:1201 /data/chrome-profile'
+docker restart fen-exam-selenium-chrome-1
+```
+
+Do not leave the bubble open while watching a live crawl — it blocks feed interaction.
+
+## 7. Next steps
 
 1. Airflow UI → **unpause** **`fen_e2e_pipeline`** (recommended for new users: **one batch**, no catch-bottom).
 2. Trigger with Configuration JSON — see [USER_SETUP.md](USER_SETUP.md) / README.
