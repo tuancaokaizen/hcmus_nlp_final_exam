@@ -316,13 +316,19 @@ B (Paddle), one verse per line:
 {b}
 
 Write recommend_ground_truth for a human reviewer.
-Rules:
-1. You MUST always fill recommend_ground_truth. Never leave it empty.
-2. Align columns and sentences: one complete verse per line.
-3. At each character, choose the glyph from A or from B that matches the BRUSH STROKES.
-4. You MUST NOT invent any character that is not in A and not in B.
-5. You MUST NOT concatenate A then B (or B then A).
-6. confidence is 0..1 for this recommend.
+Geometry (must match bbox reading order):
+1. RTL: columns RIGHT→LEFT (decreasing X). Line 1 = rightmost column / opening verse; last line = leftmost column. Never LTR.
+2. One complete column/verse per line (top→bottom within column). Never one character per line.
+3. Two-tier pages (Y-cut): finish ALL upper-tier columns RTL, THEN all lower-tier columns RTL. Do not interleave.
+
+Other rules:
+4. You MUST always fill recommend_ground_truth. Never leave it empty.
+5. At each character, choose the glyph from A or from B that matches the BRUSH STROKES.
+6. You MUST NOT invent any character that is not in A and not in B.
+7. You MUST NOT concatenate A then B (or B then A).
+8. Exclude 落款/年款/signature/seal text from recommend_ground_truth (side matter only).
+9. Merge orphan trailing fragments (≤2 chars left from a column split) into the previous verse line — do not leave them as their own line mid-body or at the end unless they are a real short couplet line.
+10. confidence is 0..1 for this recommend.
 
 Reply JSON only, no markdown:
 {{"pick":"a","recommend_ground_truth":"句一\\n句二","confidence":0.0}}
@@ -330,7 +336,9 @@ pick is a, b, or neither.
 This is not final ground_truth.
 """
 GLM_RETRY_PROMPT = """REQUIRED: recommend_ground_truth must be a non-empty JSON string.
-One verse per line using \\n. Use only characters from A or B. Do not invent.
+Geometry: RTL columns (decreasing X; line 1 = right edge); one full column/verse per line (never 字\\n字);
+Y-cut multi-tier = upper RTL then lower RTL (no interleave).
+Also: ONLY characters from A or B; do NOT invent; merge orphan ≤2-char fragments; exclude 落款/年款/signature/seal.
 A:
 {a}
 B:
@@ -354,34 +362,43 @@ Return ONLY compact JSON (no markdown):
 }
 
 kind (required):
-- ink_text: main handwritten calligraphy body only
-- margin: handwritten colophon / 年/月/日 / small side column
+- ink_text: main handwritten calligraphy BODY only (verses / couplet / poem). Also include inline biblical/printed verse refs that sit beside the body (e.g. 詩篇七十一：16) — same tier as that verse, NOT margin.
+- margin: side matter ONLY — handwritten 落款/题跋, 年款 (年/月/日), author name, dedication, small side notes. NEVER put body verses or 詩篇/chapter:verse citations here.
 - seal: stamp/chop (any color). Unreadable → text="[seal]"
-- printed: printed grid, folio, cell labels
-- other: UI, watermark, landscape, not writing
+- printed: printed grid, folio, cell labels, paper-plate specs, serial numbers
+- other: UI chrome, Facebook caption overlay, watermark, landscape, not writing
 
-Rules:
-- bounding_box is 0-1000 normalized [ymin, xmin, ymax, xmax]
+Geometry (MANDATORY — use bounding_box [ymin, xmin, ymax, xmax], 0-1000):
+1. RTL columns: sort ink_text by decreasing X (right→left). First array item = rightmost column (opening verse); last = leftmost. Never left→right (LTR).
+2. One ink_text box per vertical column: merge all glyphs that share the same X band into ONE string, top→bottom (increasing Y / ymin→ymax). Never one character per box or `字\\n字` inside a column.
+3. Y-cut / two tiers: if the page has upper + lower horizontal bands, emit ALL upper-tier columns RTL first, THEN all lower-tier columns RTL. Do NOT interleave upper and lower.
+
+Other rules:
 - Traditional Chinese as written; do not simplify; do not translate
 - Do NOT invent characters. Unsure glyph → text="[unreadable]" and confidence<=0.45
 - No readable Chinese calligraphy → gemini=[] (or only seal/printed/other), confidence<=0.3
-- ONE ink_text object per vertical COLUMN (all characters in that column, top-to-bottom concatenated). Not one object per character.
-- Seals, grids, UI chrome, screenshots, watermarks → kind=seal/printed/other, never ink_text
-- Array order: columns RIGHT-to-LEFT
-- Traditional Chinese as written; do not simplify; do not translate
+- Do NOT leave orphan ≤2-character ink fragments as separate boxes; keep them inside the column they belong to.
+- Seals, grids, UI chrome, screenshots, watermarks, printed plate specs → kind=seal/printed/other, NEVER ink_text and NEVER margin
+- Side matter (落款, date, signature) MUST be kind=margin, not ink_text. Do not leave colophon out if it is visible.
+- Do NOT move body verse text into margin. Do NOT move 落款 into ink_text.
+- Printed / UI / plate text MUST NOT be labeled margin (use printed or other).
 - confidence 0..1 for the page and each box
 """
 
 GPT_REFINE_PROMPT = """You refine OCR COLUMN lines of Chinese calligraphy.
-Each input string is already one vertical column (top-to-bottom), already ordered RIGHT-to-LEFT.
+Each input string is already one vertical column (top-to-bottom / increasing Y), already ordered RIGHT-to-LEFT (decreasing X).
+Geometry (MANDATORY):
+1. Keep RTL: first line = rightmost column; last = leftmost. Do NOT reverse to LTR.
+2. Keep one complete column/verse per line. Do NOT emit one character per line. Merge single-character and orphan ≤2-char fragments into the column/verse they belong to.
+3. Multi-tier (Y-cut): keep upper-tier lines as one contiguous RTL block, then lower-tier RTL block. Do not interleave.
+
 You may ONLY: (1) keep that RIGHT-to-LEFT column order, (2) split a column into verse lines using the SAME characters.
-Do NOT reverse columns to left-to-right.
-Do NOT emit one character per line.
 Do NOT invent, replace, simplify, or add characters.
-Do NOT copy Facebook captions or UI text.
+Do NOT copy Facebook captions, UI chrome, or printed plate/folio text.
+Do NOT attach 落款/年款/signature lines into calligraphy_lines — leave those out (they are side matter).
 
 Return ONLY JSON:
-{{"confidence": 0.0, "layout": "rtl_columns|ltr_columns|grid|unknown", "calligraphy_lines": ["..."], "flags": []}}
+{{"confidence": 0.0, "layout": "rtl_columns|multi_tier_rtl|grid|unknown", "calligraphy_lines": ["..."], "flags": []}}
 
 Input columns (JSON, already RTL):
 {lines_json}
@@ -389,11 +406,17 @@ Input columns (JSON, already RTL):
 
 DS_EVAL_PROMPT = """You judge calligraphy line order and sentence order.
 You may ONLY permute the given lines. Do NOT invent characters.
-Do NOT copy Facebook captions. No markdown. No <think>.
+Do NOT copy Facebook captions or printed plate/UI text. No markdown. No <think>.
 First character of the reply MUST be {{ .
 
+Geometry (MANDATORY):
+1. RTL: RIGHT→LEFT columns (decreasing X). Line 1 = right-edge opening verse; last line = left edge. Prefer rtl_columns; use ltr_columns ONLY if the page is clearly modern horizontal LTR print (rare).
+2. One complete verse/column per line — never one character per line.
+3. Y-cut multi-tier: all upper-tier lines first (RTL), then all lower-tier lines (RTL). Never zigzag upper↔lower.
+4. Orphan fragments (≤2 chars) from a split column: merge into the previous body line when permuting is not enough; do not leave them mid-body. True short couplet lines may stay. Titles/落款-like shorts go after body or into flags.
+
 Return ONLY JSON:
-{{"confidence": 0.0, "reading_order": "rtl_columns|ltr_columns|grid|unknown", "calligraphy_lines": ["..."], "order_ok": true, "flags": []}}
+{{"confidence": 0.0, "reading_order": "rtl_columns|multi_tier_rtl|grid|unknown|ltr_columns", "calligraphy_lines": ["..."], "order_ok": true, "flags": []}}
 
 Lines (JSON):
 {lines_json}
