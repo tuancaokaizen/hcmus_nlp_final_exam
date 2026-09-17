@@ -1080,20 +1080,107 @@ def _box_width(box: dict[str, Any]) -> int:
     return max(bb[3] - bb[1], 1)
 
 
-def cluster_boxes_to_columns(boxes: list[dict[str, Any]]) -> list[str]:
-    """Group boxes into RTL columns; join top-to-bottom inside each column.
+def _box_height(box: dict[str, Any]) -> int:
+    bb = bbox_of(box)
+    return max(bb[2] - bb[0], 1)
 
-    Gom box thành cột phải→trái; trong cột ghép trên→dưới.
-    """
-    items = [b for b in boxes if str(b.get("text") or "").strip()]
-    if not items:
-        return []
-    widths = sorted(_box_width(b) for b in items)
+
+def _cx_cluster_thresh(boxes: list[dict[str, Any]]) -> float:
+    """X-band width for column clustering / Ngưỡng bề rộng dải X khi gom cột."""
+    widths = sorted(_box_width(b) for b in boxes) if boxes else [80]
     median_w = widths[len(widths) // 2]
-    thresh = max(40.0, min(140.0, 0.7 * float(median_w)))
-    # Rightmost boxes first so new clusters are new columns to the left /
-    # Box phải nhất trước để cluster mới là cột bên trái
-    ordered = sorted(items, key=lambda b: (-_box_cx(b), _box_cy(b)))
+    return max(40.0, min(140.0, 0.7 * float(median_w)))
+
+
+def _union_bbox(boxes: list[dict[str, Any]]) -> list[int]:
+    """Axis-aligned union of box bboxes / Hộp bao hợp các bbox."""
+    bbs = [bbox_of(b) for b in boxes]
+    return [
+        min(bb[0] for bb in bbs),
+        min(bb[1] for bb in bbs),
+        max(bb[2] for bb in bbs),
+        max(bb[3] for bb in bbs),
+    ]
+
+
+def _merge_box_pair(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    """Merge two ink boxes top→bottom text + union bbox / Gộp 2 box mực: chữ trên→dưới + bbox hợp."""
+    # Keep vertical reading order inside the merge / Giữ thứ tự đọc dọc trong lần gộp
+    top, bot = (a, b) if _box_cy(a) <= _box_cy(b) else (b, a)
+    text = f"{str(top.get('text') or '').strip()}{str(bot.get('text') or '').strip()}"
+    confs = [
+        _clamp_conf(top.get("confidence"), 0.0),
+        _clamp_conf(bot.get("confidence"), 0.0),
+    ]
+    confs = [c for c in confs if c > 0]
+    out = dict(top)
+    out["text"] = text
+    out["bounding_box"] = _union_bbox([top, bot])
+    out["kind"] = "ink_text"
+    if confs:
+        out["confidence"] = min(confs)
+    return out
+
+
+def _append_orphan_to_host(host: dict[str, Any], orphan: dict[str, Any]) -> dict[str, Any]:
+    """Append orphan text after host (trailing fragment), ignore Y order.
+
+    Nối chữ orphan sau host (mảnh đuôi cột), bỏ qua thứ tự Y (bbox Gemini hay lệch).
+    """
+    out = dict(host)
+    out["text"] = f"{str(host.get('text') or '').strip()}{str(orphan.get('text') or '').strip()}"
+    out["bounding_box"] = _union_bbox([host, orphan])
+    out["kind"] = "ink_text"
+    confs = [
+        _clamp_conf(host.get("confidence"), 0.0),
+        _clamp_conf(orphan.get("confidence"), 0.0),
+    ]
+    confs = [c for c in confs if c > 0]
+    if confs:
+        out["confidence"] = min(confs)
+    return out
+
+
+def _merge_orphans_in_column(
+    col: list[dict[str, Any]],
+    *,
+    orphan_max: int = 2,
+) -> list[dict[str, Any]]:
+    """Merge ≤orphan_max CJK fragments into neighbors; keep sole short columns.
+
+    Gộp mảnh ≤orphan_max CJK vào lân cận; giữ cột ngắn nếu chỉ còn 1 box.
+    """
+    if len(col) <= 1:
+        return list(col)
+    ordered = sorted(col, key=lambda b: (_box_cy(b), bbox_of(b)[0]))
+    out: list[dict[str, Any]] = []
+    for box in ordered:
+        n = len(compact_cjk(str(box.get("text") or "")))
+        # Orphan → trailing on previous body box / Orphan → nối đuôi box thân trước
+        if out and 0 < n <= orphan_max:
+            prev_n = len(compact_cjk(str(out[-1].get("text") or "")))
+            if prev_n > orphan_max:
+                out[-1] = _append_orphan_to_host(out[-1], box)
+            else:
+                out[-1] = _merge_box_pair(out[-1], box)
+            continue
+        out.append(dict(box))
+    # Leading short + longer body → body then orphan (Gemini often Y-misplaces fragment) /
+    # Ngắn đầu + thân dài → thân rồi orphan (Gemini hay lệch Y mảnh)
+    if len(out) >= 2:
+        head_n = len(compact_cjk(str(out[0].get("text") or "")))
+        rest_n = len(compact_cjk(str(out[1].get("text") or "")))
+        if 0 < head_n <= orphan_max and rest_n > orphan_max:
+            out = [_append_orphan_to_host(out[1], out[0]), *out[2:]]
+    return out
+
+
+def _cluster_columns_by_cx(boxes: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """Cluster boxes into vertical columns by center-X / Gom box thành cột theo tâm X."""
+    if not boxes:
+        return []
+    thresh = _cx_cluster_thresh(boxes)
+    ordered = sorted(boxes, key=lambda b: (-_box_cx(b), _box_cy(b)))
     columns: list[list[dict[str, Any]]] = []
     for box in ordered:
         cx = _box_cx(box)
@@ -1107,6 +1194,126 @@ def cluster_boxes_to_columns(boxes: list[dict[str, Any]]) -> list[str]:
         if not placed:
             columns.append([box])
     columns.sort(key=lambda col: -sum(_box_cx(b) for b in col) / len(col))
+    return columns
+
+
+def _split_y_tiers(
+    boxes: list[dict[str, Any]],
+    *,
+    y_gap: float = 120.0,
+) -> list[list[dict[str, Any]]]:
+    """Split into horizontal bands when a large Y gap exists (multi-tier).
+
+    Tách dải ngang khi có khoảng cách Y lớn (trang 2 tầng).
+    """
+    if len(boxes) < 4:
+        return [list(boxes)]
+    ordered = sorted(boxes, key=_box_cy)
+    heights = sorted(_box_height(b) for b in ordered)
+    med_h = float(heights[len(heights) // 2])
+    gap_need = max(float(y_gap), 1.5 * med_h)
+    # Largest gap between consecutive centers / Khoảng cách lớn nhất giữa các tâm liên tiếp
+    best_i = -1
+    best_gap = 0.0
+    for i in range(len(ordered) - 1):
+        gap = _box_cy(ordered[i + 1]) - _box_cy(ordered[i])
+        if gap > best_gap:
+            best_gap = gap
+            best_i = i
+    if best_i < 0 or best_gap < gap_need:
+        return [list(boxes)]
+    upper, lower = ordered[: best_i + 1], ordered[best_i + 1 :]
+    # Require both tiers to hold enough ink / Đòi hai tầng đều có đủ mực
+    if len(upper) < 2 or len(lower) < 2:
+        return [list(boxes)]
+    return [upper, lower]
+
+
+def _merge_orphan_columns(
+    columns: list[list[dict[str, Any]]],
+    *,
+    orphan_max: int = 2,
+) -> list[list[dict[str, Any]]]:
+    """Merge orphans inside columns; glue a short column into a longer RTL neighbor.
+
+    Gộp orphan trong cột; dán cột ngắn vào cột RTL dài hơn (tránh gộp hai câu đối ngắn).
+    """
+    if not columns:
+        return []
+    # Always collapse fragments inside each column first /
+    # Luôn gộp mảnh trong từng cột trước
+    prepared = [_merge_orphans_in_column(col, orphan_max=orphan_max) for col in columns]
+    if len(prepared) == 1:
+        return prepared
+    # Work right→left so we always prefer the previous RTL column /
+    # Duyệt phải→trái để ưu tiên cột RTL liền trước
+    out: list[list[dict[str, Any]]] = []
+    for merged_col in prepared:
+        cjk_n = sum(len(compact_cjk(str(b.get("text") or ""))) for b in merged_col)
+        if out and 0 < cjk_n <= orphan_max:
+            host_n = sum(len(compact_cjk(str(b.get("text") or ""))) for b in out[-1])
+            # Only absorb into a real body column / Chỉ nuốt vào cột thân bài thật
+            if host_n > orphan_max:
+                host = list(out[-1])
+                for frag in merged_col:
+                    host[-1] = _append_orphan_to_host(host[-1], frag)
+                out[-1] = host
+                continue
+        out.append(merged_col)
+    return out
+
+
+def sort_ink_by_bbox(
+    boxes: list[dict[str, Any]],
+    *,
+    y_gap: float = 120.0,
+    orphan_max: int = 2,
+) -> list[dict[str, Any]]:
+    """Deterministic ink order: Y-tiers → RTL columns → orphan merge.
+
+    Thứ tự mực deterministic: tầng Y → cột phải→trái → gộp orphan.
+    """
+    items = [b for b in boxes if str(b.get("text") or "").strip()]
+    if not items:
+        return []
+    ordered: list[dict[str, Any]] = []
+    # Upper tier first, then lower; each tier RTL by column /
+    # Tầng trên trước, dưới sau; mỗi tầng RTL theo cột
+    for tier in _split_y_tiers(items, y_gap=y_gap):
+        cols = _merge_orphan_columns(
+            _cluster_columns_by_cx(tier),
+            orphan_max=orphan_max,
+        )
+        for col in cols:
+            ordered.extend(col)
+    return ordered
+
+
+def reassemble_page_boxes(
+    all_boxes: list[dict[str, Any]],
+    ordered_ink: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Put sorted ink first; keep non-ink (margin/seal/…) after.
+
+    Đặt mực đã sort trước; giữ box phụ (margin/ấn/…) phía sau.
+    """
+    non_ink = [
+        b
+        for b in all_boxes
+        if str(b.get("kind") or "").strip().lower().replace("-", "_") not in {"ink_text", "main"}
+    ]
+    return list(ordered_ink) + non_ink
+
+
+def cluster_boxes_to_columns(boxes: list[dict[str, Any]]) -> list[str]:
+    """Group boxes into RTL columns; join top-to-bottom inside each column.
+
+    Gom box thành cột phải→trái; trong cột ghép trên→dưới.
+    """
+    items = [b for b in boxes if str(b.get("text") or "").strip()]
+    if not items:
+        return []
+    columns = _cluster_columns_by_cx(items)
     lines: list[str] = []
     for col in columns:
         col.sort(key=lambda b: (_box_cy(b), bbox_of(b)[0]))
@@ -3882,6 +4089,10 @@ def _ocr_fuse_one(
 
     g_boxes: list[dict[str, Any]] = gem.get("boxes") or []
     g_ink = [b for b in g_boxes if b.get("kind") == "ink_text"]
+    # Deterministic bbox reading order before refine/fuse /
+    # Thứ tự đọc theo bbox deterministic trước refine/fuse
+    g_ink = sort_ink_by_bbox(g_ink)
+    g_boxes = reassemble_page_boxes(g_boxes, g_ink)
     g_conf = _clamp_conf(gem.get("confidence"), 0.0)
     if any(UI_RE.search(str(b.get("text") or "")) for b in g_boxes):
         flags.append("ui_chrome")
@@ -3897,6 +4108,8 @@ def _ocr_fuse_one(
         flags.append("paddle_empty")
 
     p_ink = [b for b in p_blocks if b.get("kind") == "ink_text"]
+    p_ink = sort_ink_by_bbox(p_ink)
+    p_blocks = reassemble_page_boxes(p_blocks, p_ink)
     if p_ink:
         p_conf = _weighted_conf(p_ink) or p_conf
     elif not p_err:
